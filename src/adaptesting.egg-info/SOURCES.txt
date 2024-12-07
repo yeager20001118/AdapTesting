@@ -1,0 +1,13 @@
+LICENSE
+README.md
+setup.py
+src/adaptesting/__init__.py
+src/adaptesting/constants.py
+src/adaptesting/main.py
+src/adaptesting/utils.py
+src/adaptesting.egg-info/PKG-INFO
+src/adaptesting.egg-info/SOURCES.txt
+src/adaptesting.egg-info/dependency_links.txt
+src/adaptesting.egg-info/requires.txt
+src/adaptesting.egg-info/top_level.txt
+tests/test_main.py
