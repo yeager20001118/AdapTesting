@@ -141,9 +141,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
     p_value = count / num_permutations
     return p_value, observed_mmd
 
-# Helper functions for MMD-Agg test
-
-
+################################### Helper functions for MMD-Agg test ###################################
 def compute_agg_bandwidths(dist, n_bandwidth):
 
     device = dist.device
@@ -180,23 +178,29 @@ def compute_agg_bandwidths(dist, n_bandwidth):
 
     return bandwidths
 
-
 def create_weights(n_bandwidth):
     return torch.full((n_bandwidth,), 1/n_bandwidth)
 
+def permute_data(m, n, seed, B1, B2, device, is_jax=False):
 
-def permute_data(m, n, seed, B1, B2, device):
-    # Set random seed
-    key = jrandom.PRNGKey(seed)
-    key, subkey = jrandom.split(key)
-    base_array = jnp.arange(m + n)  # Create once
-    repeated_array = jnp.tile(base_array, (B1 + B2 + 1, 1))
-    idx = jrandom.permutation(
-        subkey, repeated_array, axis=1, independent=True)
+    if is_jax:
+        # Set random seed
+        key = jrandom.PRNGKey(seed)
+        key, subkey = jrandom.split(key)
+        base_array = jnp.arange(m + n)  # Create once
+        repeated_array = jnp.tile(base_array, (B1 + B2 + 1, 1))
+        idx = jrandom.permutation(
+            subkey, repeated_array, axis=1, independent=True)
 
-    # print(idx)
-
-    idx = torch.from_numpy(np.array(idx)).long().to(device)
+        idx = torch.from_numpy(np.array(idx)).long().to(device)
+        # print(idx.size())
+    else:
+        base_array = torch.arange(m + n, device=device)
+        repeated_array = base_array.repeat(B1 + B2 + 1, 1)
+        # Generate independent permutations for each row
+        idx = torch.stack([torch.randperm(m + n, device=device)
+                        for _ in range(B1 + B2 + 1)])
+        # print(idx.size())
 
     v11 = torch.cat([torch.ones(m), -torch.ones(n)]).to(device)  # (m+n,)
     V11i = v11.repeat(B1 + B2 + 1, 1)  # (B1+B2+1, m+n)
@@ -219,3 +223,105 @@ def permute_data(m, n, seed, B1, B2, device):
     V01 = V01.T
 
     return V11, V10, V01
+
+
+def wild_bootstrap(m, n, seed, B1, B2, device, is_jax=False):
+    
+    if is_jax:
+        # Generate random keys
+        key = jrandom.PRNGKey(seed)
+        key, subkey = jrandom.split(key) # (B1+B2+1, n) Rademacher
+        R = jrandom.choice(subkey, jnp.array(
+            [-1.0, 1.0]), shape=(B1 + B2 + 1, n))
+        R = R.at[B1].set(jnp.ones(n))
+        R = R.transpose()
+        R = jnp.concatenate((R, -R))  # (2n, B1+B2+1)
+        R = torch.from_numpy(np.array(R)).long().to(device)
+    else:
+        R = torch.randint(0, 2, (B1 + B2 + 1, n), device=device) * 2.0 - 1.0
+        # Set middle row (index B1) to ones
+        R[B1] = torch.ones(n, device=device)
+
+        # Transpose and concatenate with negation
+        R = R.t()  # transpose
+        R = torch.cat((R, -R), dim=0)  # concatenate with negation
+
+    return R.float()
+
+
+def generate_mmd_matrix(X, Y, kernel_bandwidths_l_list, n_bandwidth, B1, B2, params, is_permuted):
+    N = n_bandwidth * len(kernel_bandwidths_l_list)
+    M = torch.zeros((N, B1 + B2 + 1))
+    m, n = len(X), len(Y)
+    last_norm_computed = 0
+    for j in range(len(kernel_bandwidths_l_list)):
+        kernel, bandwidths, norm = kernel_bandwidths_l_list[j]
+        """ Since kernel_bandwidths_l_list is ordered "l1" first, "l2" second
+            compute pairwise matrices the minimum amount of time
+            store only one pairwise matrix at once """
+        if norm != last_norm_computed:
+            Z = torch.cat([X, Y], dim=0)
+            pairwise_matrix = torch_distance(Z, Z, norm)
+            last_norm_computed = norm
+        for i in range(n_bandwidth):
+            K = kernel_matrix(pairwise_matrix, kernel, bandwidths[i], True)
+
+            # Set diagonal elements to zero
+            K.fill_diagonal_(0)
+
+            if is_permuted:
+                [V11, V10, V01] = params
+                # Compute MMD permuted values
+                M[n_bandwidth * j + i] = (
+                    torch.sum(V10 * (K @ V10), dim=0) * (n - m + 1) / (m * n * (m - 1)) +
+                    torch.sum(V01 * (K @ V01), dim=0) * (m - n + 1) / (m * n * (n - 1)) +
+                    torch.sum(V11 * (K @ V11), dim=0) / (m * n)
+                )
+            else:
+                [R] = params
+                # Get diagonal indices for n x n matrix
+                diag_indices = torch.arange(n, device=K.device)
+
+                # Set diagonal elements of all four submatrices to zero
+                K[diag_indices, diag_indices] = 0
+                K[diag_indices, diag_indices + n] = 0
+                K[diag_indices + n, diag_indices] = 0
+                K[diag_indices + n, diag_indices + n] = 0
+
+                # Compute MMD bootstrapped values
+                M[n_bandwidth * j + i] = torch.sum(R * (K @ R), dim=0) / (n * (n - 1))
+
+    return M
+
+def compute_u(M, kernel_bandwidths_l_list, n_bandwidth, B1, B2, B3, weights, alpha):
+    
+    M1_sorted = torch.sort(M[:, :B1+1], dim=1)[0]
+    M2 = M[:, B1+1:]
+    N = n_bandwidth * len(kernel_bandwidths_l_list)
+    quantiles = torch.zeros((N, 1))
+    u_min = 0
+    u_max = torch.min(1/weights)
+    for _ in range(B3):
+        u = (u_max + u_min) / 2
+        for j in range(len(kernel_bandwidths_l_list)):
+            for i in range(n_bandwidth):
+                idx = (torch.ceil(
+                    (B1 + 1) * (1 - u * weights[i])) - 1).to(torch.long)
+                quantiles[n_bandwidth * j +
+                          i] = M1_sorted[n_bandwidth * j + i, idx]
+
+        P_u = torch.sum(torch.max(M2 - quantiles, dim=0)[0] > 0) / B2
+
+        # Single line condition using torch.where
+        u_min, u_max = torch.where(P_u <= alpha, torch.tensor(
+            [u, u_max]), torch.tensor([u_min, u]))
+    u = u_min
+    for j in range(len(kernel_bandwidths_l_list)):
+        for i in range(n_bandwidth):
+            idx = (torch.ceil((B1 + 1) * (1 - u * weights[i])).long() - 1)
+            quantiles[n_bandwidth * j +
+                      i] = M1_sorted[n_bandwidth * j + i, idx]
+    return u, quantiles
+#########################################################################################################
+
+################################### Helper functions for C2ST test ######################################

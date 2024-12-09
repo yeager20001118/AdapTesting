@@ -12,7 +12,9 @@ def tst(
         n_perm=100,
         kernel="gaussian",
         n_bandwidth=10,
-        seed=0):
+        seed=0,
+        is_jax=False,
+        is_permuted=False):
 
     # print("test")
 
@@ -50,7 +52,7 @@ def tst(
     elif method == 'agg':
         # perform a MMD-Agg test
         p_value, mmd_value = agg(
-            X, Y, alpha, n_perm, kernel, n_bandwidth, seed)
+            X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted)
     # Supervised TST
     elif method == 'deep':
         # perform a MMD-Deep test
@@ -91,12 +93,11 @@ def fuse(X, Y):
     return 0, 0
 
 
-def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
+def agg(X, Y, alpha, n_perm=2000, kernel="laplace_gaussian", n_bandwidth=10, seed=42, is_jax=False, is_permuted=False):
     # print(X)
-    B1 = 2000
-    B2 = 2000
+    B1 = n_perm
+    B2 = n_perm
     B3 = 50
-    m, n = len(X), len(Y)
     device = X.device
     kernel_bandwidths_l_list = []
 
@@ -113,61 +114,25 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
             kernel_bandwidths_l_list.append((kernel, bandwidths, norm))
     # print(kernel_bandwidths_l_list)
     weights = create_weights(n_bandwidth) / len(kernel_bandwidths_l_list)
-    V11, V10, V01 = permute_data(len(X), len(Y), seed, B1, B2, device)
+    if is_permuted:
+        # Permutation test
+        V11, V10, V01 = permute_data(len(X), len(Y), seed, B1, B2, device, is_jax)
+    else:
+        # Wild bootstrap
+        R = wild_bootstrap(len(X), len(Y), seed, B1, B2, device, is_jax)
 
     # Step 1: compute all simulated MMD estimates (efficient as in Appendix C in MMD-Agg paper)
-    N = n_bandwidth * len(kernel_bandwidths_l_list)
-    M = torch.zeros((N, B1 + B2 + 1))
-    last_norm_computed = 0
-    for j in range(len(kernel_bandwidths_l_list)):
-        kernel, bandwidths, norm = kernel_bandwidths_l_list[j]
-        """ Since kernel_bandwidths_l_list is ordered "l1" first, "l2" second
-            compute pairwise matrices the minimum amount of time
-            store only one pairwise matrix at once """
-        if norm != last_norm_computed:
-            Z = torch.cat([X, Y], dim=0)
-            pairwise_matrix = torch_distance(Z, Z, norm)
-            last_norm_computed = norm
-        for i in range(n_bandwidth):
-            K = kernel_matrix(pairwise_matrix, kernel, bandwidths[i], True)
+    if is_permuted:
+        M = generate_mmd_matrix(X, Y, kernel_bandwidths_l_list,
+                                n_bandwidth, B1, B2, [V11, V10, V01], is_permuted)
+    else:
+        M = generate_mmd_matrix(X, Y, kernel_bandwidths_l_list, n_bandwidth, B1, B2, [R], is_permuted)
 
-            # Set diagonal elements to zero
-            K.fill_diagonal_(0)
-
-            # Compute MMD permuted values
-            M[n_bandwidth * j + i] = (
-                torch.sum(V10 * (K @ V10), dim=0) * (n - m + 1) / (m * n * (m - 1)) +
-                torch.sum(V01 * (K @ V01), dim=0) * (m - n + 1) / (m * n * (n - 1)) +
-                torch.sum(V11 * (K @ V11), dim=0) / (m * n)
-            )
     mmd_values = M[:, B1].clone()
     M1_sorted = torch.sort(M[:, :B1+1], dim=1)[0]
-    M2 = M[:, B1+1:]
 
     # Step 2: compute u_alpha_hat using the bisection method
-    quantiles = torch.zeros((N, 1))
-    u_min = 0
-    u_max = torch.min(1/weights)
-    for _ in range(B3):
-        u = (u_max + u_min) / 2
-        for j in range(len(kernel_bandwidths_l_list)):
-            for i in range(n_bandwidth):
-                idx = (torch.ceil(
-                    (B1 + 1) * (1 - u * weights[i])) - 1).to(torch.long)
-                quantiles[n_bandwidth * j +
-                          i] = M1_sorted[n_bandwidth * j + i, idx]
-
-        P_u = torch.sum(torch.max(M2 - quantiles, dim=0)[0] > 0) / B2
-
-        # Single line condition using torch.where
-        u_min, u_max = torch.where(P_u <= alpha, torch.tensor(
-            [u, u_max]), torch.tensor([u_min, u]))
-    u = u_min
-    for j in range(len(kernel_bandwidths_l_list)):
-        for i in range(n_bandwidth):
-            idx = (torch.ceil((B1 + 1) * (1 - u * weights[i])).long() - 1)
-            quantiles[n_bandwidth * j +
-                      i] = M1_sorted[n_bandwidth * j + i, idx]
+    u, _ = compute_u(M, kernel_bandwidths_l_list, n_bandwidth, B1, B2, B3, weights, alpha)
 
     # Step 3: output test result
     p_vals = torch.mean(
@@ -178,8 +143,10 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
             all_weights[n_bandwidth * j + i] = weights[i]
     thresholds = u * all_weights
 
+    # print(p_vals, thresholds)
     # Calculate scaled p-values
     scaled_p_vals = p_vals * (alpha / thresholds)
+    # print(scaled_p_vals)
 
     min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
     mmd_value = mmd_values[min_idx]
@@ -187,8 +154,10 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
 
 
 def deep(X, Y):
+    
     return 0, 0
 
 
 def clf(X, Y):
+
     return 0, 0
