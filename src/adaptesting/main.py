@@ -9,12 +9,18 @@ def tst(
         device="cpu",
         dtype=torch.float32,
         data_type='not_specified',
+        model=None,
         n_perm=100,
         kernel="gaussian",
         n_bandwidth=10,
+        patience=50,
         seed=0,
+        train_ratio=0.5,
         is_jax=False,
-        is_permuted=False):
+        is_permuted=False,
+        is_log = False,
+        is_history = False,
+        is_label = False):
 
     # print("test")
 
@@ -59,7 +65,8 @@ def tst(
         p_value, mmd_value = deep(X, Y)
     elif method == 'clf':
         # perform a classifier two-sample test
-        p_value, mmd_value = clf(X, Y)
+        p_value, mmd_value = clf(
+            X, Y, n_perm, model, data_type, train_ratio, patience, is_log, is_history, is_label)
     # Semi-supervised TST tbc...
     else:
         raise ValueError("Unsupported test type")
@@ -93,7 +100,7 @@ def fuse(X, Y):
     return 0, 0
 
 
-def agg(X, Y, alpha, n_perm=2000, kernel="laplace_gaussian", n_bandwidth=10, seed=42, is_jax=False, is_permuted=False):
+def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
     # print(X)
     B1 = n_perm
     B2 = n_perm
@@ -158,6 +165,33 @@ def deep(X, Y):
     return 0, 0
 
 
-def clf(X, Y):
+def clf(X, Y, n_perm, model, data_type, train_ratio, patience, is_log, is_history, is_label):
+    X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
+    device = X.device
+    if data_type == 'tabular' and model is None:
+        input_dim = X.size(1)
+        hidden_dim = min(max(16, input_dim // 2), input_dim * 4)
+        model = TabNetNoEmbeddings(
+            input_dim=input_dim,
+            output_dim=2,  # binary classification
+            n_d=hidden_dim,
+            n_a=hidden_dim,
+            n_steps=2,       
+            gamma=1,       
+            n_independent=1,  
+            n_shared=1,      
+            virtual_batch_size=128,
+            momentum=0.02
+        ).to(device)
+        model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
+        # print(model)
 
-    return 0, 0
+    model, history = train_clf(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
+                      max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log)
+    
+    if is_history:
+        fig = plot_training_history(history)
+        plt.show()
+
+    p_value, mmd_value = test_clf(X_te, Y_te, n_perm, model, is_label)
+    return p_value, mmd_value

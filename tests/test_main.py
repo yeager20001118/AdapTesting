@@ -1,4 +1,5 @@
 from adaptesting import tst
+from pytorch_tabnet.tab_network import TabNetNoEmbeddings
 
 import torch
 # from main import *
@@ -21,8 +22,8 @@ n_trial = 100
 for _ in range(n_trial):
 
     Z1 = mvn1.sample((1000,))
-    # Z2 = mvn2.sample((1000,))  # Test power
-    Z2 = mvn1.sample((1000,))  # Type-I error
+    Z2 = mvn2.sample((1000,))  # Test power
+    # Z2 = mvn1.sample((1000,))  # Type-I error
 
     # Create a list of indices from 0 to 199
     indices = list(range(1000))
@@ -42,8 +43,8 @@ for _ in range(n_trial):
 
     # print(X[:5], Y[:5])
     # h, _ = tst(X, Y, device = "cuda") # default method is median heuristic
-    h, _ = tst(X, Y, device="cuda", method="agg", n_perm=3000)
-    # h, _ = tst(X, Y, device="cuda", method="clf")
+    # h, _ = tst(X, Y, device="cuda", method="agg", n_perm=3000)
+    h, _ = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=100, n_perm=200)
     counter += h
     # break
 

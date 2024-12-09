@@ -1,9 +1,17 @@
 import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
+from pytorch_tabnet.tab_network import TabNetNoEmbeddings
+import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
 import jax.random as jrandom
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 from .constants import *
 
+#########################################################################################################
+
+####################################### General helper functions ########################################
 
 def check_shapes_and_adjust(X, Y):
     # Check if X and Y have the same length
@@ -141,7 +149,10 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
     p_value = count / num_permutations
     return p_value, observed_mmd
 
+#########################################################################################################
+
 ################################### Helper functions for MMD-Agg test ###################################
+
 def compute_agg_bandwidths(dist, n_bandwidth):
 
     device = dist.device
@@ -325,3 +336,248 @@ def compute_u(M, kernel_bandwidths_l_list, n_bandwidth, B1, B2, B3, weights, alp
 #########################################################################################################
 
 ################################### Helper functions for C2ST test ######################################
+
+def split_datasets(X, Y, train_ratio=0.5, seed=None):
+    """
+    Split two groups of tensors into train and test sets while maintaining their structure.
+    
+    Args:
+        X (torch.Tensor): First group tensor of shape (n, ...)
+        Y (torch.Tensor): Second group tensor of shape (n, ...)
+        train_ratio (float): Proportion of data to use for training (default: 0.5)
+        seed (int, optional): Random seed for reproducibility
+        
+    Returns:
+        tuple: (X_train, X_test, Y_train, Y_test)
+    """
+    # Input validation
+    assert 0 < train_ratio < 1, "train_ratio must be between 0 and 1"
+
+    # Set random seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    # Get number of samples
+    n_samples = X.size(0)
+    device = X.device
+
+    n_train = int(n_samples * train_ratio)
+    n_test = n_samples - n_train
+
+    if n_train < 2 or n_test < 2:
+        raise ValueError(
+            f"Split would result in train_size={n_train}, test_size={n_test}. "
+            f"Both must be >= 2. Either adjust train_ratio={train_ratio} or "
+            f"provide more samples (current n_samples={n_samples})"
+        )
+
+    # Generate random permutation
+    perm = torch.randperm(n_samples, device=device)
+
+    # Split indices
+    train_indices = perm[:n_train]
+    test_indices = perm[n_train:]
+
+    # Split the datasets
+    X_train = X[train_indices]
+    X_test = X[test_indices]
+    Y_train = Y[train_indices]
+    Y_test = Y[test_indices]
+
+    return X_train, X_test, Y_train, Y_test
+
+
+def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log):
+    device = X.device
+    n_samples = X.size(0)
+
+    criterion = torch.nn.CrossEntropyLoss()
+    # optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+    scheduler = lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.1, patience=patience, min_lr=1e-6
+    )
+
+    Z = torch.cat([X, Y], dim=0)
+    y = torch.cat([torch.zeros(n_samples), torch.ones(n_samples)]).to(
+        device, torch.long)
+    
+    # Z_dummy = Z.clone()
+
+    Z_tr, Z_val, y_tr, y_val = split_datasets(Z, y, train_ratio=1-val_ratio)
+    train_dataset = TensorDataset(
+        Z_tr,
+        y_tr
+        )
+    # print(Z_tr.size(), y_tr)
+    # val_dataset = TensorDataset(
+    #     Z_val.to(device),
+    #     y_val.to(device)
+    # )
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True)
+    # val_loader = DataLoader(val_dataset, batch_size=batch_size)
+
+    # Training history
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'val_accuracy': []
+    }
+
+    # Early stopping variables
+    best_val_loss = float('inf')
+    best_model_state = None
+    patience_counter = 0
+    lambda_sparse = 1e-3
+
+    for epoch in range(max_epoch):
+        # Training phase
+        model.train()
+        train_losses = []
+        for X_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            # print(next(model.parameters()).is_cuda)
+            # print(X_batch.is_cuda)
+            # X_batch = X_batch.to(device, dtype)
+            outputs, M_loss = model(X_batch)
+            # outputs = X_batch
+            # print(outputs)
+            loss = criterion(outputs, y_batch) + lambda_sparse * M_loss
+            # loss = criterion(outputs, y_batch)
+            # loss = criterion(outputs, y_batch)
+            loss.backward()
+            optimizer.step()
+            train_losses.append(loss.item())
+
+        if is_log and (epoch+1) % patience == 0:
+            print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr)[0], y_tr))
+            # print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr), y_tr))
+
+        # Validation phase
+        model.eval()
+        val_losses = []
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            outputs, _ = model(Z_val)
+            # outputs = model(Z_val)
+            loss = criterion(outputs, y_val)
+            val_losses.append(loss.item())
+
+            _, predicted = torch.max(outputs.data, 1)
+            total += y_val.size(0)
+            correct += (predicted == y_val).sum().item()
+
+        # Calculate metrics
+        avg_train_loss = np.mean(train_losses)
+        avg_val_loss = np.mean(val_losses)
+        
+        scheduler.step(avg_val_loss)
+
+        val_accuracy = correct / total
+
+        # Update history
+        history['train_loss'].append(avg_train_loss)
+        history['val_loss'].append(avg_val_loss)
+        history['val_accuracy'].append(val_accuracy)
+
+        # Early stopping check
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            best_model_state = model.state_dict().copy()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            if is_log:
+                print(f"Early stopping at epoch {epoch}")
+            break
+
+    # Load best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    return model, history
+
+
+def plot_training_history(history, figsize=(12, 5)):
+    """
+    Plot training history showing loss curves and accuracy.
+    
+    Args:
+        history (dict): Dictionary containing 'train_loss', 'val_loss', and 'val_accuracy'
+        figsize (tuple): Figure size (width, height)
+    """
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+
+    # Get number of epochs
+    epochs = range(1, len(history['train_loss']) + 1)
+
+    # Plot training and validation loss
+    ax1.plot(epochs, history['train_loss'], 'b-', label='Training Loss')
+    ax1.plot(epochs, history['val_loss'], 'r-', label='Validation Loss')
+    ax1.set_title('Training and Validation Loss')
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Loss')
+    ax1.legend()
+    ax1.grid(True)
+
+    # Plot validation accuracy
+    ax2.plot(epochs, history['val_accuracy'],
+             'g-', label='Validation Accuracy')
+    ax2.set_title('Validation Accuracy')
+    ax2.set_xlabel('Epochs')
+    ax2.set_ylabel('Accuracy')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Find best performance
+    best_epoch = np.argmin(history['val_loss']) + 1
+    best_val_loss = min(history['val_loss'])
+    best_accuracy = max(history['val_accuracy'])
+
+    # Add text box with best performance
+    textstr = f'Best Performance:\nEpoch: {best_epoch}\nVal Loss: {best_val_loss:.4f}\nVal Acc: {best_accuracy:.4f}'
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax2.text(0.05, 0.05, textstr, transform=ax2.transAxes, fontsize=9,
+             verticalalignment='bottom', bbox=props)
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+
+    return fig
+
+def test_clf(X, Y, n_perm, model, is_label=False):
+    device = X.device
+    n_samples = X.size(0)
+
+    Z = torch.cat([X, Y], dim=0)
+    n_total = Z.size(0)
+
+    outputs = model(Z)[0]
+    outputs = torch.nn.Softmax(dim=1)(outputs)
+    if is_label:
+        outputs = outputs.max(1, keepdim=True)[1]
+
+    outputs = outputs.float()
+    mmd_value = torch.abs(torch.mean(
+        outputs[:n_samples, 0]) - torch.mean(outputs[n_samples:, 0]))
+    print(torch.mean(outputs[:n_samples, 0]),
+            torch.mean(outputs[n_samples:, 0]))
+    mmd_values = torch.zeros(n_perm, device=device)
+    for r in range(n_perm):
+        ind = torch.randperm(n_total)
+
+        ind_X = ind[:n_samples]
+        ind_Y = ind[n_samples:]
+
+        mmd_values[r] = torch.abs(torch.mean(
+            outputs[ind_X, 0]) - torch.mean(outputs[ind_Y, 0]))
+
+    p_value = (mmd_values >= mmd_value).float().mean().item()
+    return p_value, mmd_value
