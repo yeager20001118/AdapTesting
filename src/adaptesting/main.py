@@ -47,7 +47,7 @@ def tst(
 
     X, Y = check_shapes_and_adjust(X, Y)
     n_sample = len(X)  # represent the size of one sample
-    if model is None:
+    if model is None and method in ['deep', 'clf']:
         default_model = True
         if data_type == 'tabular':
             input_dim = X.size(1)
@@ -65,6 +65,23 @@ def tst(
                 momentum=0.02
             ).to(device)
             model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
+            if method == "deep":
+                # Deep method only need the representation layers' output
+                model = model.encoder
+        elif data_type == 'image':
+            n_channels = X.size(1)
+            image_size = X.size(2) # assuming square images where size(2) = size(3)
+            model = DefaultImageModel(
+                n_channels=n_channels, image_size=image_size, weights='DEFAULT')
+            
+            # Add classification layer if classifier method
+            if method != "deep":
+                model.resnet.fc = nn.Sequential(
+                    model.resnet.fc,
+                    nn.ReLU(),
+                    nn.Linear(100, 2)
+                )
+            model = model.to(device)
     else:
         default_model = False
 
@@ -83,7 +100,7 @@ def tst(
     elif method == 'deep':
         # perform a MMD-Deep test
         p_value, mmd_value = deep(
-            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model)
+            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model, data_type)
     elif method == 'clf':
         # perform a classifier two-sample test
         p_value, mmd_value = clf(
@@ -223,22 +240,18 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
     return min_p_value, mmd_value
 
 
-def deep(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model):
+def deep(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model, data_type):
     X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
 
-    if default_model:
-        # Deep method only need the representation layers' output
-        model = model.encoder
-
     model, history, params = train_deep(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
-                                max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model)
+                                max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model, data_type=data_type)
     
     if is_history:
         fig = plot_training_history(history)
         plt.show()
 
     p_value, mmd_value = p_value, mmd_value = mmd_permutation_test(
-        X, Y, n_perm, "deep", params + [model])
+        X_te, Y_te, n_perm, "deep", params + [model], data_type=data_type)
     
     return p_value, mmd_value
 

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from pytorch_tabnet.tab_network import TabNetNoEmbeddings
+import torchvision
 import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
 import jax.random as jrandom
@@ -12,6 +13,41 @@ from .constants import *
 #########################################################################################################
 
 ####################################### General helper functions ########################################
+
+
+class DefaultImageModel(nn.Module):
+
+    def __init__(self, n_channels=3, weights='DEFAULT', image_size=32):
+        super().__init__()
+        self.image_size = image_size
+
+        # Load base ResNet with new weights parameter
+        if weights == 'DEFAULT':
+            weights = torchvision.models.ResNet18_Weights.DEFAULT
+        self.resnet = torchvision.models.resnet18(weights=weights)
+
+        # Modify input layer if needed
+        if n_channels != 3:
+            self.resnet.conv1 = nn.Conv2d(n_channels, 64, kernel_size=7,
+                                            stride=2, padding=3, bias=False)
+
+        # For very small images (like MNIST 28x28 or CIFAR 32x32)
+        if image_size < 64:
+            # Modify first conv layer to have smaller stride
+            self.resnet.conv1 = nn.Conv2d(n_channels, 64, kernel_size=3,
+                                            stride=1, padding=1, bias=False)
+            # Remove maxpool layer
+            self.resnet.maxpool = nn.Identity()
+
+        # Store the original fc layer
+        num_features = self.resnet.fc.in_features
+        self.resnet.fc = nn.Linear(num_features, 100)
+
+    def forward(self, x):
+        output = self.resnet(x)
+        # Return both output and a zero sparse loss to match TabNet interface
+        sparse_loss = torch.tensor(0.0, device=x.device)
+        return output, sparse_loss
 
 def check_shapes_and_adjust(X, Y):
     # Check if X and Y have the same length
@@ -50,6 +86,13 @@ def get_norms(kernel):
 
 
 def torch_distance(X, Y, norm=2, max_size=None, matrix=True, is_squared=False):
+    if X.dim() == 4:
+        # Flatten to (batch_size, channel*height*width)
+        X = X.view(X.size(0), -1)
+    if Y.dim() == 4:
+        # Flatten to (batch_size, channel*height*width)
+        Y = Y.view(Y.size(0), -1)
+
     # Ensure X and Y are at least 2D (handles 1D cases)
     if X.dim() == 1:
         X = X.view(-1, 1)
@@ -58,6 +101,7 @@ def torch_distance(X, Y, norm=2, max_size=None, matrix=True, is_squared=False):
 
     # Broadcasting the subtraction operation across all pairs of vectors
     diff = X[None, :, :] - Y[:, None, :]
+    # print(diff.size())
 
     if norm == 2:
         # Computing the L2 distance (Euclidean distance)
@@ -136,7 +180,7 @@ def mmd_u(K, n, m, is_var=False):
     return mmd_u_squared
 
 
-def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0):
+def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0, data_type="tabular"):
     """Perform MMD permutation test and return the p-value."""
 
     if kernel == "gaussian":
@@ -155,7 +199,11 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
 
     # Compute the Kernel matrix
     if kernel == "deep":
-        fz = stack_representation(model)(Z)[0]
+        if data_type == 'tabular':
+            f = stack_representation(model)
+        else:
+            f = model
+        fz = f(Z)[0]
         pairwise_matrix_f = torch_distance(fz, fz, norm)
         K_q = gaussian_kernel(pairwise_matrix, b_q)
         K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
@@ -173,7 +221,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
         perm_Z = torch.cat((perm_X, perm_Y))
         pairwise_matrix = torch_distance(perm_Z, perm_Z, norm)
         if kernel == "deep":
-            fz = stack_representation(model)(perm_Z)[0]
+            fz = f(perm_Z)[0]
             pairwise_matrix_f = torch_distance(fz, fz, norm)
             K_q = gaussian_kernel(pairwise_matrix, b_q)
             K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
@@ -682,14 +730,17 @@ def get_median_bandwidth(X, Y, kernel):
     median = torch.median(pairwise_matrix)
     return median
 
-def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log, default_model):
+def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log, default_model, data_type):
     
     device = X.device
     dtype = torch.float32
     n_samples = X.size(0)
     
     if default_model:
-        f = stack_representation(model)
+        if data_type == 'tabular':
+            f = stack_representation(model)
+        else:
+            f = model
         fx, fy = f(X)[0], f(Y)[0]
     else:
         f = model
