@@ -1,3 +1,4 @@
 torch
 typing
 jax
+pytorch_tabnet

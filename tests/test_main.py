@@ -1,8 +1,5 @@
 from adaptesting import tst
-from pytorch_tabnet.tab_network import TabNetNoEmbeddings
-
 import torch
-# from main import *
 import random
 from torch.distributions import MultivariateNormal
 import time
@@ -19,34 +16,37 @@ random.seed(0)
 
 counter = 0
 n_trial = 100
+n_samples = 250
 for _ in range(n_trial):
 
     Z1 = mvn1.sample((1000,))
     Z2 = mvn2.sample((1000,))  # Test power
     # Z2 = mvn1.sample((1000,))  # Type-I error
 
-    # Create a list of indices from 0 to 199
+    # Create a list of indices from 0 to 1000
     indices = list(range(1000))
 
     # Shuffle the indices
     random.shuffle(indices)
 
-    # Select the first 100 shuffled indices for X
-    X_indices = indices[:250]
+    # Select the n_samples for X
+    X_indices = indices[:n_samples]
 
-    # Select the remaining indices for Y
-    # Y_indices = indices[50:]
+    # Select the n_samples for Y
+    # Y_indices = indices[:n_samples]
 
-    # Sample X and Y from Z using the selected indices
+    # Sample X and Y from Z using the selected indices,
+    # X.size() = (n_samples, 2), Y.size() = (n_samples, 2)
     X = Z1[X_indices]
     Y = Z2[X_indices]
 
-    # print(X[:5], Y[:5])
-    # h, _ = tst(X, Y, device = "cuda") # default method is median heuristic
+    h, _ = tst(X, Y, device = "cuda") # default method is median heuristic
+    # h, _ = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
     # h, _ = tst(X, Y, device="cuda", method="agg", n_perm=3000)
-    h, _ = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=100, n_perm=200)
+    # h, _ = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
+    # h, _ = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
     counter += h
-    # break
+    break
 
 print(f"Power: {counter}/{n_trial}")
 end = time.time()

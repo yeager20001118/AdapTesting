@@ -31,6 +31,7 @@ def check_shapes_and_adjust(X, Y):
 
 
 def get_norms(kernel):
+    # print(kernel)
     norms = []
     flag = False
     kernel = kernel.lower()  # Case-insensitive comparison
@@ -48,7 +49,7 @@ def get_norms(kernel):
                      L2 norm kernel {KERNEL_LIST[1]}")
 
 
-def torch_distance(X, Y, norm=2, max_size=None, matrix=True):
+def torch_distance(X, Y, norm=2, max_size=None, matrix=True, is_squared=False):
     # Ensure X and Y are at least 2D (handles 1D cases)
     if X.dim() == 1:
         X = X.view(-1, 1)
@@ -60,7 +61,11 @@ def torch_distance(X, Y, norm=2, max_size=None, matrix=True):
 
     if norm == 2:
         # Computing the L2 distance (Euclidean distance)
-        dist = torch.sqrt(torch.sum(diff**2, dim=-1))
+        if is_squared:
+            # If the pairwise matrix is squared
+            dist = torch.sum(diff**2, dim=-1)
+        else:
+            dist = torch.sqrt(torch.sum(diff**2, dim=-1))
     elif norm == 1:
         # Computing the L1 distance (Manhattan distance)
         dist = torch.sum(torch.abs(diff), dim=-1)
@@ -78,17 +83,25 @@ def torch_distance(X, Y, norm=2, max_size=None, matrix=True):
         return dist[indices[0], indices[1]]
 
 
-def gaussian_kernel(pairwise_matrix, bandwidth, scale=False):
+def gaussian_kernel(pairwise_matrix, bandwidth, scale=False, is_squared=False):
     d = pairwise_matrix / bandwidth
 
     if scale:
         return torch.exp(-(d**2))
+    
+    if is_squared:
+        # If the pairwise matrix is squared
+        return torch.exp(-(d/bandwidth) / 2)
 
     return torch.exp(-(d**2) / 2)
 
 
-def laplace_kernel(pairwise_matrix, bandwidth):
+def laplace_kernel(pairwise_matrix, bandwidth, scale=False):
     d = pairwise_matrix / bandwidth
+
+    if scale:
+        return torch.exp(-d * torch.sqrt(torch.tensor(2.0)))
+    
     return torch.exp(-d)
 
 
@@ -96,13 +109,10 @@ def kernel_matrix(pairwise_matrix, kernel, bandwidth, scale=False):
     if kernel == "gaussian":
         return gaussian_kernel(pairwise_matrix, bandwidth, scale)
     elif kernel == "laplace":
-        return laplace_kernel(pairwise_matrix, bandwidth)
+        return laplace_kernel(pairwise_matrix, bandwidth, scale)
 
 
-def mmd_u(pairwise_matrix, n, m, kernel, bandwidth):
-    # Compute the full Gaussian kernel matrix from the pairwise distance matrix
-    K = kernel_matrix(pairwise_matrix, kernel, bandwidth)
-
+def mmd_u(K, n, m, is_var=False):
     # Extract submatrices for XX, YY, and XY
     K_XX = K[:n, :n]
     K_YY = K[n:, n:]
@@ -115,6 +125,14 @@ def mmd_u(pairwise_matrix, n, m, kernel, bandwidth):
     # Calculate each term of the MMD_u^2
     mmd_u_squared = (K_XX.sum() / (n * (n - 1))) + \
         (K_YY.sum() / (m * (m - 1))) - (2 * K_XY.sum() / (n * m))
+    
+    if is_var:
+        h_matrix = K_XX + K_YY - K_XY - K_XY.t()
+        row_means = h_matrix.sum(1) / m
+        V1 = torch.dot(row_means, row_means) / m
+        V2 = h_matrix.sum() / (n * n)
+        variance = 4 * (V1 - V2**2)
+        return mmd_u_squared, variance
     return mmd_u_squared
 
 
@@ -125,6 +143,8 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
         bandwidth = params[0]
     elif kernel == "laplace":
         bandwidth = params[0]
+    elif kernel == "deep":
+        c_epsilon, b_q, b_phi, model = params
 
     norm = get_norms(kernel)[0]
 
@@ -133,16 +153,34 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
     n = len(X)
     m = len(Y)
 
-    observed_mmd = mmd_u(pairwise_matrix, n, m, kernel, bandwidth)
+    # Compute the Kernel matrix
+    if kernel == "deep":
+        fz = stack_representation(model)(Z)[0]
+        pairwise_matrix_f = torch_distance(fz, fz, norm)
+        K_q = gaussian_kernel(pairwise_matrix, b_q)
+        K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
+        K = (1-c_epsilon) * K_phi * K_q + c_epsilon * K_q
+    else:
+        K = kernel_matrix(pairwise_matrix, kernel, bandwidth)
+
+    observed_mmd = mmd_u(K, n, m)
     count = 0
     # torch.manual_seed(kk+10)
     for _ in range(num_permutations):
-        perm = torch.randperm(Z.size(0))
+        perm = torch.randperm(Z.size(0), device=Z.device)
         perm_X = Z[perm[:n]]
         perm_Y = Z[perm[n:]]
         perm_Z = torch.cat((perm_X, perm_Y))
         pairwise_matrix = torch_distance(perm_Z, perm_Z, norm)
-        perm_mmd = mmd_u(pairwise_matrix, n, m, kernel, bandwidth)
+        if kernel == "deep":
+            fz = stack_representation(model)(perm_Z)[0]
+            pairwise_matrix_f = torch_distance(fz, fz, norm)
+            K_q = gaussian_kernel(pairwise_matrix, b_q)
+            K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
+            K_perm = (1-c_epsilon) * K_phi * K_q + c_epsilon * K_q
+        else:
+            K_perm = kernel_matrix(pairwise_matrix, kernel, bandwidth)
+        perm_mmd = mmd_u(K_perm, n, m)
         if perm_mmd >= observed_mmd:
             count += 1
 
@@ -150,6 +188,22 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
     return p_value, observed_mmd
 
 #########################################################################################################
+
+
+def compute_bandwidths(dist, n_bandwidth):
+    median = torch.median(dist)
+    dist = dist + (dist == 0) * median
+
+    dd = torch.sort(dist)[0]
+    n = len(dd)
+    idx_5 = int(torch.floor(torch.tensor(n * 0.05)).item())
+    idx_95 = int(torch.floor(torch.tensor(n * 0.95)).item())
+    lambda_min = dd[idx_5] / 2
+    lambda_max = dd[idx_95] * 2
+    bandwidths = torch.linspace(
+        lambda_min, lambda_max, n_bandwidth).to(dist.device)
+    return bandwidths
+
 
 ################################### Helper functions for MMD-Agg test ###################################
 
@@ -387,7 +441,7 @@ def split_datasets(X, Y, train_ratio=0.5, seed=None):
     return X_train, X_test, Y_train, Y_test
 
 
-def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log):
+def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log, default_model):
     device = X.device
     n_samples = X.size(0)
 
@@ -408,7 +462,7 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
     train_dataset = TensorDataset(
         Z_tr,
         y_tr
-        )
+    )
     # print(Z_tr.size(), y_tr)
     # val_dataset = TensorDataset(
     #     Z_val.to(device),
@@ -440,20 +494,22 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
             optimizer.zero_grad()
             # print(next(model.parameters()).is_cuda)
             # print(X_batch.is_cuda)
-            # X_batch = X_batch.to(device, dtype)
-            outputs, M_loss = model(X_batch)
-            # outputs = X_batch
-            # print(outputs)
+            if default_model:
+                outputs, M_loss = model(X_batch)
+            else:
+                outputs = model(X_batch)
+                M_loss = 0
+                # loss = criterion(outputs, y_batch)
             loss = criterion(outputs, y_batch) + lambda_sparse * M_loss
-            # loss = criterion(outputs, y_batch)
-            # loss = criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
             train_losses.append(loss.item())
 
         if is_log and (epoch+1) % patience == 0:
-            print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr)[0], y_tr))
-            # print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr), y_tr))
+            if default_model:
+                print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr)[0], y_tr))
+            else:
+                print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr), y_tr))
 
         # Validation phase
         model.eval()
@@ -462,8 +518,10 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
         total = 0
 
         with torch.no_grad():
-            outputs, _ = model(Z_val)
-            # outputs = model(Z_val)
+            if default_model:
+                outputs = model(Z_val)[0]
+            else:
+                outputs = model(Z_val)
             loss = criterion(outputs, y_val)
             val_losses.append(loss.item())
 
@@ -474,10 +532,10 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
         # Calculate metrics
         avg_train_loss = np.mean(train_losses)
         avg_val_loss = np.mean(val_losses)
+        val_accuracy = correct / total
         
         scheduler.step(avg_val_loss)
 
-        val_accuracy = correct / total
 
         # Update history
         history['train_loss'].append(avg_train_loss)
@@ -552,14 +610,17 @@ def plot_training_history(history, figsize=(12, 5)):
 
     return fig
 
-def test_clf(X, Y, n_perm, model, is_label=False):
+def test_clf(X, Y, n_perm, model, is_label, default_model):
     device = X.device
     n_samples = X.size(0)
 
     Z = torch.cat([X, Y], dim=0)
     n_total = Z.size(0)
 
-    outputs = model(Z)[0]
+    if default_model:
+        outputs = model(Z)[0]
+    else:
+        outputs = model(Z)
     outputs = torch.nn.Softmax(dim=1)(outputs)
     if is_label:
         outputs = outputs.max(1, keepdim=True)[1]
@@ -567,8 +628,7 @@ def test_clf(X, Y, n_perm, model, is_label=False):
     outputs = outputs.float()
     mmd_value = torch.abs(torch.mean(
         outputs[:n_samples, 0]) - torch.mean(outputs[n_samples:, 0]))
-    print(torch.mean(outputs[:n_samples, 0]),
-            torch.mean(outputs[n_samples:, 0]))
+    # print(torch.mean(outputs[:n_samples, 0]), torch.mean(outputs[n_samples:, 0]))
     mmd_values = torch.zeros(n_perm, device=device)
     for r in range(n_perm):
         ind = torch.randperm(n_total)
@@ -581,3 +641,174 @@ def test_clf(X, Y, n_perm, model, is_label=False):
 
     p_value = (mmd_values >= mmd_value).float().mean().item()
     return p_value, mmd_value
+
+#########################################################################################################
+
+################################### Helper functions for MMD-Deep #######################################
+
+def stack_representation(model):
+    def feature_extractor(x):
+        steps_output, M_Loss = model(x)
+        return torch.stack(steps_output, dim=0).mean(dim=0), M_Loss
+    return feature_extractor
+
+def deep_objective(fz, Z, epsilon, b_q, b_phi, n_samples):
+
+    # Compute pairwise distances
+    pairwise_matrix = torch_distance(Z, Z, norm=2, is_squared=True)
+    pairwise_matrix_f = torch_distance(fz, fz, norm=2, is_squared=True)
+
+    # Compute kernel matrices
+    K_q = gaussian_kernel(pairwise_matrix, b_q, is_squared=True)
+    K_phi = gaussian_kernel(pairwise_matrix_f, b_phi, is_squared=True)
+
+    # Compute deep kernel matrix
+    K_deep = (1-epsilon) * K_phi * K_q + epsilon * K_q
+
+    tmp = mmd_u(K_deep, n_samples, n_samples, is_var=True)
+    mmd_value, mmd_std = tmp[0]+1e-8, torch.sqrt(tmp[1]+1e-8)
+
+    if mmd_std.item() == 0:
+        print("Warning: Zero variance in MMD estimate")
+
+    stats = torch.div(-1*mmd_value, mmd_std)
+
+    return stats, mmd_value
+
+def get_median_bandwidth(X, Y, kernel):
+    Z = torch.cat([X, Y], dim=0)
+    norm = get_norms(kernel)[0]
+    pairwise_matrix = torch_distance(Z, Z, norm)
+    median = torch.median(pairwise_matrix)
+    return median
+
+def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_log, default_model):
+    
+    device = X.device
+    dtype = torch.float32
+    n_samples = X.size(0)
+    
+    if default_model:
+        f = stack_representation(model)
+        fx, fy = f(X)[0], f(Y)[0]
+    else:
+        f = model
+        fx, fy = f(X), f(Y)
+
+    b_q = get_median_bandwidth(X, Y, 'gaussian').clone()
+    b_phi = get_median_bandwidth(fx, fy, 'gaussian').clone()
+    
+    c_epsilon = torch.tensor(1.0).to(device)
+    b_q = torch.nn.Parameter(b_q)
+    b_phi = torch.nn.Parameter(b_phi)
+    c_epsilon.requires_grad = True
+    b_q.requires_grad = True
+    b_phi.requires_grad = True
+    
+    # optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # optimizer = torch.optim.Adam(list(model.parameters()) + [c_epsilon, b_q, b_phi], lr=lr)
+    optimizer = torch.optim.Adam(list(model.parameters()) + [c_epsilon, b_q, b_phi], lr=lr, weight_decay=1e-5)
+    scheduler = lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.1, patience=patience, min_lr=1e-6
+    )
+
+    X_tr, X_val, Y_tr, Y_val = split_datasets(X, Y, train_ratio=1-val_ratio)
+    train_dataset = TensorDataset(
+        X_tr, 
+        Y_tr
+    )
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True)
+    Z_tr = torch.cat([X_tr, Y_tr], dim=0)
+    Z_val = torch.cat([X_val, Y_val], dim=0)
+    n_samples_tr = len(X_tr)
+    n_samples_val = len(X_val)
+
+    # Training history
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'val_accuracy': []
+    }
+
+    # Early stopping variables
+    best_val_loss = float('inf')
+    best_model_state = None
+    patience_counter = 0
+    lambda_sparse = 1e-3
+
+    for epoch in range(max_epoch):
+        
+        # Training phase
+        model.train()
+        train_losses = []
+        for X_batch, Y_batch in train_loader:
+            Z_batch = torch.cat([X_batch, Y_batch], dim=0)
+            optimizer.zero_grad()
+            epsilon = torch.sigmoid(c_epsilon)
+            if default_model:
+                fz, M_loss = f(Z_batch)
+            else:
+                fz = f(Z_batch)
+                M_loss = 0
+            # print(fz)
+            n_samples = X_batch.size(0)
+            loss = deep_objective(fz, Z_batch, epsilon, b_q, b_phi, n_samples)[0] + lambda_sparse * M_loss
+            # print("Loss:", loss)
+            loss.backward()
+            optimizer.step()
+            train_losses.append(loss.item())
+            
+        if is_log and (epoch+1) % patience == 0:
+            if default_model:
+                print(f"Epoch {epoch+1}' J stats: ",
+                      -1 * deep_objective(f(Z_tr)[0], Z_tr, epsilon, b_q, b_phi, n_samples_tr)[0].item())
+            else:
+                print(f"Epoch {epoch+1}' J stats: ",
+                      -1 * deep_objective(f(Z_tr), Z_tr, epsilon, b_q, b_phi, n_samples_tr)[0].item())
+        
+        # Validation phase
+        model.eval()
+        val_losses = []
+
+        with torch.no_grad():
+            epsilon = torch.sigmoid(c_epsilon)
+            # f = stack_representation(model)
+            if default_model:
+                fz_val = f(Z_val)[0]
+            else:
+                fz_val = f(Z_val)
+            # print(fz_val)
+            loss, mmd_value = deep_objective(
+                fz_val, Z_val, epsilon, b_q, b_phi, n_samples_val)
+            val_losses.append(loss.item())
+
+        avg_train_loss = np.mean(train_losses)
+        avg_val_loss = np.mean(val_losses)
+        val_accuracy = mmd_value.item()
+
+        scheduler.step(avg_val_loss)
+
+        # Update history
+        history['train_loss'].append(avg_train_loss)
+        history['val_loss'].append(avg_val_loss)
+        history['val_accuracy'].append(val_accuracy)
+
+        # Early stopping check
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            best_model_state = model.state_dict().copy()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            if is_log:
+                print(f"Early stopping at epoch {epoch}")
+            break
+
+    # Load best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    return model, history, [c_epsilon, b_q, b_phi]

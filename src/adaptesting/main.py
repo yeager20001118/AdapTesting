@@ -47,6 +47,26 @@ def tst(
 
     X, Y = check_shapes_and_adjust(X, Y)
     n_sample = len(X)  # represent the size of one sample
+    if model is None:
+        default_model = True
+        if data_type == 'tabular':
+            input_dim = X.size(1)
+            hidden_dim = min(max(16, input_dim // 2), input_dim * 4)
+            model = TabNetNoEmbeddings(
+                input_dim=input_dim,
+                output_dim=2,  # binary classification
+                n_d=hidden_dim,
+                n_a=hidden_dim,
+                n_steps=2,
+                gamma=1,
+                n_independent=1,
+                n_shared=1,
+                virtual_batch_size=128,
+                momentum=0.02
+            ).to(device)
+            model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
+    else:
+        default_model = False
 
     # Unsupervised TST
     if method == 'median':
@@ -54,7 +74,7 @@ def tst(
         p_value, mmd_value = median(X, Y, n_perm, kernel, seed)
     elif method == 'fuse':
         # perform a MMD-FUSE test
-        p_value, mmd_value = fuse(X, Y)
+        p_value, mmd_value = fuse(X, Y, n_perm, kernel, n_bandwidth, seed, is_jax)
     elif method == 'agg':
         # perform a MMD-Agg test
         p_value, mmd_value = agg(
@@ -62,11 +82,12 @@ def tst(
     # Supervised TST
     elif method == 'deep':
         # perform a MMD-Deep test
-        p_value, mmd_value = deep(X, Y)
+        p_value, mmd_value = deep(
+            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model)
     elif method == 'clf':
         # perform a classifier two-sample test
         p_value, mmd_value = clf(
-            X, Y, n_perm, model, data_type, train_ratio, patience, is_log, is_history, is_label)
+            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, is_label, default_model)
     # Semi-supervised TST tbc...
     else:
         raise ValueError("Unsupported test type")
@@ -87,7 +108,7 @@ def median(X, Y, n_perm, kernel, seed):
     Z = torch.cat([X, Y], dim=0)
     norm = get_norms(kernel)[0]
     pairwise_matrix = torch_distance(Z, Z, norm)
-    # print(Z)
+    # print(pairwise_matrix.size())
     median = torch.median(pairwise_matrix)
     # print(median)
     p_value, mmd_value = mmd_permutation_test(
@@ -96,9 +117,51 @@ def median(X, Y, n_perm, kernel, seed):
     return p_value, mmd_value
 
 
-def fuse(X, Y):
-    return 0, 0
+def fuse(X, Y, n_perm, kernel, n_bandwidth, seed, is_jax):
+    device = X.device
+    m, n = len(X), len(Y)
+    V11, V10, V01 = permute_data(len(X), len(Y), seed, n_perm, 0, device, is_jax)
+    kernels = sorted(kernel.split("_"), reverse=True)
+    n_kernels = len(kernels)
+    N = n_bandwidth * n_kernels
+    M = torch.zeros((N, n_perm + 1))
+    kernel_count = -1
+    for j in range(len(kernels)):
+        kernel_j = kernels[j]
+        Z = torch.cat([X, Y], dim=0)
+        norm = get_norms(kernel_j)[0]
+        dist = torch_distance(Z, Z, norm, matrix=False)
+        bandwidths = compute_bandwidths(dist, n_bandwidth)
 
+        # Compute all permuted MMD estimates
+        kernel_count += 1
+        for i in range(n_bandwidth):
+            bandwidth = bandwidths[i]
+            pairwise_matrix = torch_distance(Z, Z, norm)
+            if norm == 1:
+                K = kernel_matrix(pairwise_matrix, kernel_j, bandwidth, scale=True)
+            else:
+                K = kernel_matrix(pairwise_matrix, kernel_j, bandwidth)
+
+            # Set diagonal elements to zero
+            K.fill_diagonal_(0)
+            
+            # Compute standard deviation
+            unscaled_std = torch.sqrt(torch.sum(K**2))
+
+            # Compute MMD permuted values
+            M[n_bandwidth * j + i] = (
+                torch.sum(V10 * (K @ V10), dim=0) * (n - m + 1) * (n - 1) / (m * (m - 1)) +
+                torch.sum(V01 * (K @ V01), dim=0) * (m - n + 1) / m +
+                torch.sum(V11 * (K @ V11), dim=0) * (n - 1) / m
+            ) / unscaled_std * np.sqrt(n * (n - 1))
+
+
+    mmd_values = torch.logsumexp(M, dim=0) + torch.log(torch.tensor(1.0/N))
+    mmd_value = mmd_values[-1]
+    p_value = (mmd_values[:-1] >= mmd_value).float().mean().item()
+
+    return p_value, mmd_value
 
 def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
     # print(X)
@@ -160,38 +223,35 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
     return min_p_value, mmd_value
 
 
-def deep(X, Y):
-    
-    return 0, 0
-
-
-def clf(X, Y, n_perm, model, data_type, train_ratio, patience, is_log, is_history, is_label):
+def deep(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model):
     X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
-    device = X.device
-    if data_type == 'tabular' and model is None:
-        input_dim = X.size(1)
-        hidden_dim = min(max(16, input_dim // 2), input_dim * 4)
-        model = TabNetNoEmbeddings(
-            input_dim=input_dim,
-            output_dim=2,  # binary classification
-            n_d=hidden_dim,
-            n_a=hidden_dim,
-            n_steps=2,       
-            gamma=1,       
-            n_independent=1,  
-            n_shared=1,      
-            virtual_batch_size=128,
-            momentum=0.02
-        ).to(device)
-        model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
-        # print(model)
 
-    model, history = train_clf(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
-                      max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log)
+    if default_model:
+        # Deep method only need the representation layers' output
+        model = model.encoder
+
+    model, history, params = train_deep(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
+                                max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model)
     
     if is_history:
         fig = plot_training_history(history)
         plt.show()
 
-    p_value, mmd_value = test_clf(X_te, Y_te, n_perm, model, is_label)
+    p_value, mmd_value = p_value, mmd_value = mmd_permutation_test(
+        X, Y, n_perm, "deep", params + [model])
+    
+    return p_value, mmd_value
+
+
+def clf(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, is_label, default_model):
+    X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
+
+    model, history = train_clf(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
+                      max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model)
+    
+    if is_history:
+        fig = plot_training_history(history)
+        plt.show()
+
+    p_value, mmd_value = test_clf(X_te, Y_te, n_perm, model, is_label, default_model)
     return p_value, mmd_value
