@@ -204,10 +204,11 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
         else:
             f = model
         fz = f(Z)[0]
+        epsilon = torch.sigmoid(c_epsilon)
         pairwise_matrix_f = torch_distance(fz, fz, norm)
         K_q = gaussian_kernel(pairwise_matrix, b_q)
         K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-        K = (1-c_epsilon) * K_phi * K_q + c_epsilon * K_q
+        K = (1-epsilon) * K_phi * K_q + epsilon * K_q
     else:
         K = kernel_matrix(pairwise_matrix, kernel, bandwidth)
 
@@ -225,7 +226,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
             pairwise_matrix_f = torch_distance(fz, fz, norm)
             K_q = gaussian_kernel(pairwise_matrix, b_q)
             K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-            K_perm = (1-c_epsilon) * K_phi * K_q + c_epsilon * K_q
+            K_perm = (1-epsilon) * K_phi * K_q + epsilon * K_q
         else:
             K_perm = kernel_matrix(pairwise_matrix, kernel, bandwidth)
         perm_mmd = mmd_u(K_perm, n, m)
