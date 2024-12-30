@@ -73,7 +73,7 @@ for _ in range(n_trial):
 print(f"Power: {counter}/{n_trial}")
 ```
 
-## Performance Display
+## Performance Display (on the example)
 
 | Method       | Median | MMD-FUSE | MMD-Agg | MMD-Deep | C2ST-MMD |
 | ------------ | ------ | -------- | ------- | -------- | -------- |
