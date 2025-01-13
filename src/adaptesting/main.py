@@ -21,9 +21,15 @@ def tst(
         is_log = False,
         is_history = False,
         is_label = False):
-
-    # print("test")
-
+    
+    if data_type == "text":
+        if isinstance(X, list) or isinstance(Y, list):
+            # Make sure the X and Y are both in the form of [str1, str2, ...]
+            X = sentences_to_embeddings(X, device)
+            Y = sentences_to_embeddings(Y, device)
+        else:
+            data_type = "tabular"
+    
     # Check the X, Y are torch tensors
     if not isinstance(X, torch.Tensor):
         raise ValueError("X must be a torch tensor")
@@ -118,7 +124,7 @@ def tst(
         print(f"Fail to reject the null hypothesis with p-value: {p_value}, "
               f"the MMD value is {mmd_value}.")
 
-    return h, p_value
+    return h, mmd_value, p_value
 
 
 def median(X, Y, n_perm, kernel, seed):

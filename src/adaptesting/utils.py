@@ -9,6 +9,7 @@ import jax.random as jrandom
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from .constants import *
+from transformers import RobertaModel, RobertaTokenizer
 
 #########################################################################################################
 
@@ -235,6 +236,22 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
 
     p_value = count / num_permutations
     return p_value, observed_mmd
+
+
+def sentences_to_embeddings(sentences, device):
+    model = RobertaModel.from_pretrained('roberta-base').to(device)
+    tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+    # Tokenize all sentences (batch processing)
+    encoded_input = tokenizer(
+        sentences, padding=True, truncation=True, max_length=512, return_tensors="pt")
+    # Generate embeddings
+    encoded_input = {k: v.to(device) for k, v in encoded_input.items()}
+    with torch.no_grad():
+        outputs = model(**encoded_input)
+    # Use the mean of the last hidden states as the representation for each sentence
+    sentence_embeddings = outputs.last_hidden_state.mean(
+        dim=1)  # Mean pooling across tokens
+    return sentence_embeddings
 
 #########################################################################################################
 

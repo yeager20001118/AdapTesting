@@ -2,95 +2,73 @@
 
 A Python package for state-of-the-art data adaptive hypothesis testing methods with GPU acceleration support. Currently only support for two-sample testing, independence testing will be released later.
 
-## Methods for TST
+## Methods for TST - referenced paper
 
-- Median Heuristics
-- MMD-FUSE
-- MMD-Agg
-- MMD-Deep
-- C2ST-MMD
+- Median Heuristics - [Large Sample Analysis of the Median Heuristic](https://arxiv.org/pdf/1707.07269)
+- MMD-FUSE - [MMD-FUSE: Learning and Combining Kernels for Two-Sample Testing Without Data Splitting](https://arxiv.org/pdf/2306.08777)
+- MMD-Agg - [MMD Aggregated Two-Sample Test](https://arxiv.org/pdf/2110.15073)
+- MMD-Deep - [Learning Deep Kernels for Non-Parametric Two-Sample Tests](https://arxiv.org/pdf/2002.09116)
+- C2ST-MMD - [Revisiting Classifier Two-Sample Tests](https://arxiv.org/pdf/1610.06545)
 
-## Installation and Usage
+### Installation and Usage
 
-### Installation
+#### Installation
 
 ```bash
 pip install adaptesting
 ```
 
-### Example usage
+#### Example usage of Two-sample Testing
+
+The detailed demo examples (for tabular, image and text data) can be found in the [examples](./examples) directory.
 
 ```Python
-from adaptesting import tst # Load the main library to conduct tst
-# Generate data as example, make sure the input data should be Pytorch Tensor
+from adaptesting import tst # Import main function 'tst' from package 'adaptesting'
+
+# Example synthetic input data
 import torch
-import random
 from torch.distributions import MultivariateNormal
-torch.manual_seed(0)
-random.seed(0)
 mean = torch.tensor([0.5, 0.5])
-cov1 = torch.tensor([[1.0, 0.5], [0.5, 1.0]])
-cov2 = torch.tensor([[1.0, 0], [0, 1.0]])
-mvn1 = MultivariateNormal(mean, cov1)
-mvn2 = MultivariateNormal(mean, cov2)
-counter = 0
-n_trial = 100
-n_samples = 250
-# Conduct Experiments for n_trial times, 
-# remove the for loop if only want to get a result of reject or not
-for _ in range(n_trial):
+cov1, cov2 = torch.tensor([[1.0, 0.5], [0.5, 1.0]]), torch.tensor([[1.0, 0], [0, 1.0]])
+mvn1, mvn2 = MultivariateNormal(mean, cov1), MultivariateNormal(mean, cov2)
 
-    # Uncomment Z2 with same distribution to test Type-I error
-    Z1 = mvn1.sample((1000,))
-    Z2 = mvn2.sample((1000,))  # Test power
-    # Z2 = mvn1.sample((1000,))  # Type-I error
+# Replace X, Y to your own data, make sure its type as torch.Tensor
+X, Y = mvn1.sample((1000,)), mvn2.sample((1000,)) 
 
-    # Create a list of indices from 0 to 1000
-    indices = list(range(1000))
+# Five kinds of SOTA TST methods to choose：
+h, mmd_value, p_value = tst(X, Y, device="cuda") # Default method using median heuristic
 
-    # Shuffle the indices
-    random.shuffle(indices)
+# Other available methods and their default arguments setting (uncomment to use):
+# h, mmd_value, p_value = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
+# h, mmd_value, p_value = tst(X, Y, device="cuda", method="agg", n_perm=3000)
+# h, mmd_value, p_value = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
+# h, mmd_value, p_value = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
 
-    # Select the n_samples for X
-    X_indices = indices[:n_samples]
+"""
+Output of tst: 
+    (result of testing: 0 or 1, 
+    mmd value of two samples, 
+    p-value of testing)
 
-    # Select the n_samples for Y
-    # Y_indices = indices[:n_samples]
-
-    # Sample X and Y from Z using the selected indices, 
-    # X.size() = (n_samples, 2), Y.size() = (n_samples, 2)
-    X = Z1[X_indices]
-    Y = Z2[X_indices]
-
-    # Five kinds of SOTA TST methods to choose
-    h, _ = tst(X, Y, device = "cuda") # default method is median heuristic
-    # h, _ = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
-    # h, _ = tst(X, Y, device="cuda", method="agg", n_perm=3000)
-    # h, _ = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
-    # h, _ = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
-    counter += h
-
-print(f"Power: {counter}/{n_trial}")
+If testing the two samples are from different distribution, the console will output 
+    'Reject the null hypothesis with p-value: ..., the MMD value is ...'.
+Otherwise,
+    'Fail to reject the null hypothesis with p-value: ..., the MMD value is ...'.
+"""
 ```
 
-## Performance Display (on the example)
+### Performance of TST methods
 
-| Method       | Median | MMD-FUSE | MMD-Agg | MMD-Deep | C2ST-MMD |
-| ------------ | ------ | -------- | ------- | -------- | -------- |
-| Test Power   | 0.69   | 0.56     | 0.72    | 0.72     | 0.71     |
-| Type-I Error | 0.01   | 0.03     | 0.04    | 0.05     | 0.06     |
-| Runtime (s)  | 4.49   | 10.14    | 3.48    | 486.81   | 570.94   |
-
-# Notes:
+Performance evaluations and benchmarks across tabular, image, and text data can be found in the [examples](./examples) directory.
 
 - Test Power: Ability to correctly reject H0 when false (higher is better)
-- Type-I Error: Rate of falsely rejecting H0 when true (should be ≤ α)
+- Type-I Error: Rate of falsely rejecting H0 when true (should be ≤ α, the significance level)
 - Running Time: Computational time in seconds
 
-# Method Descriptions:
+<!-- ### Method Descriptions:
 
 1. **Median-Heuristic**: Classic MMD test with median-based kernel bandwidth
 2. **MMD-Fuse**: MMD with multiple kernel bandwidths
 3. **MMD-Agg**: Aggregated MMD test across different kernels
 4. **MMD-Deep**: Deep kernel MMD with neural network learned features
-5. **C2ST-MMD**: Classifier two-sample test with MMD statistic
+5. **C2ST-MMD**: Classifier two-sample test with MMD statistic -->
