@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/pytorch-%3E%3D2.1-blue.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<!-- [![Conference](https://img.shields.io/badge/Pub-ICML25-blue.svg)](https://icml.cc/2025) -->
+
 </div>
 
 ## Introduction
@@ -84,7 +84,7 @@ Otherwise,
 Performance evaluations and benchmarks across tabular, image, and text data can be found in the [examples](./examples) directory.
 
 - Test Power: Ability to correctly reject H0 when false (higher is better)
-- Type-I Error: Rate of falsely rejecting H0 when true (should be ≤ α, the significance level)
+- Type-I Error: Rate of falsely rejecting H0 when true (should be $\leq \alpha$, the significance level)
 - Running Time: Computational time in seconds
 
 <!-- ### Method Descriptions:

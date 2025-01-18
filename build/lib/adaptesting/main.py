@@ -9,13 +9,27 @@ def tst(
         device="cpu",
         dtype=torch.float32,
         data_type='not_specified',
+        model=None,
         n_perm=100,
         kernel="gaussian",
         n_bandwidth=10,
-        seed=0):
-
-    # print("test")
-
+        patience=50,
+        seed=0,
+        train_ratio=0.5,
+        is_jax=False,
+        is_permuted=False,
+        is_log = False,
+        is_history = False,
+        is_label = False):
+    
+    if data_type == "text":
+        if isinstance(X, list) or isinstance(Y, list):
+            # Make sure the X and Y are both in the form of [str1, str2, ...]
+            X = sentences_to_embeddings(X, device)
+            Y = sentences_to_embeddings(Y, device)
+        else:
+            data_type = "tabular"
+    
     # Check the X, Y are torch tensors
     if not isinstance(X, torch.Tensor):
         raise ValueError("X must be a torch tensor")
@@ -39,6 +53,43 @@ def tst(
 
     X, Y = check_shapes_and_adjust(X, Y)
     n_sample = len(X)  # represent the size of one sample
+    if model is None and method in ['deep', 'clf']:
+        default_model = True
+        if data_type == 'tabular':
+            input_dim = X.size(1)
+            hidden_dim = min(max(16, input_dim // 2), input_dim * 4)
+            model = TabNetNoEmbeddings(
+                input_dim=input_dim,
+                output_dim=2,  # binary classification
+                n_d=hidden_dim,
+                n_a=hidden_dim,
+                n_steps=2,
+                gamma=1,
+                n_independent=1,
+                n_shared=1,
+                virtual_batch_size=128,
+                momentum=0.02
+            ).to(device)
+            model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
+            if method == "deep":
+                # Deep method only need the representation layers' output
+                model = model.encoder
+        elif data_type == 'image':
+            n_channels = X.size(1)
+            image_size = X.size(2) # assuming square images where size(2) = size(3)
+            model = DefaultImageModel(
+                n_channels=n_channels, image_size=image_size, weights='DEFAULT')
+            
+            # Add classification layer if classifier method
+            if method != "deep":
+                model.resnet.fc = nn.Sequential(
+                    model.resnet.fc,
+                    nn.ReLU(),
+                    nn.Linear(100, 2)
+                )
+            model = model.to(device)
+    else:
+        default_model = False
 
     # Unsupervised TST
     if method == 'median':
@@ -46,18 +97,20 @@ def tst(
         p_value, mmd_value = median(X, Y, n_perm, kernel, seed)
     elif method == 'fuse':
         # perform a MMD-FUSE test
-        p_value, mmd_value = fuse(X, Y)
+        p_value, mmd_value = fuse(X, Y, n_perm, kernel, n_bandwidth, seed, is_jax)
     elif method == 'agg':
         # perform a MMD-Agg test
         p_value, mmd_value = agg(
-            X, Y, alpha, n_perm, kernel, n_bandwidth, seed)
+            X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted)
     # Supervised TST
     elif method == 'deep':
         # perform a MMD-Deep test
-        p_value, mmd_value = deep(X, Y)
+        p_value, mmd_value = deep(
+            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model, data_type)
     elif method == 'clf':
         # perform a classifier two-sample test
-        p_value, mmd_value = clf(X, Y)
+        p_value, mmd_value = clf(
+            X, Y, n_perm, model, train_ratio, patience, is_log, is_history, is_label, default_model)
     # Semi-supervised TST tbc...
     else:
         raise ValueError("Unsupported test type")
@@ -71,14 +124,14 @@ def tst(
         print(f"Fail to reject the null hypothesis with p-value: {p_value}, "
               f"the MMD value is {mmd_value}.")
 
-    return h, p_value
+    return h, mmd_value, p_value
 
 
 def median(X, Y, n_perm, kernel, seed):
     Z = torch.cat([X, Y], dim=0)
     norm = get_norms(kernel)[0]
     pairwise_matrix = torch_distance(Z, Z, norm)
-    # print(Z)
+    # print(pairwise_matrix.size())
     median = torch.median(pairwise_matrix)
     # print(median)
     p_value, mmd_value = mmd_permutation_test(
@@ -87,16 +140,57 @@ def median(X, Y, n_perm, kernel, seed):
     return p_value, mmd_value
 
 
-def fuse(X, Y):
-    return 0, 0
-
-
-def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
-    # print(X)
-    B1 = 2000
-    B2 = 2000
-    B3 = 50
+def fuse(X, Y, n_perm, kernel, n_bandwidth, seed, is_jax):
+    device = X.device
     m, n = len(X), len(Y)
+    V11, V10, V01 = permute_data(len(X), len(Y), seed, n_perm, 0, device, is_jax)
+    kernels = sorted(kernel.split("_"), reverse=True)
+    n_kernels = len(kernels)
+    N = n_bandwidth * n_kernels
+    M = torch.zeros((N, n_perm + 1))
+    kernel_count = -1
+    for j in range(len(kernels)):
+        kernel_j = kernels[j]
+        Z = torch.cat([X, Y], dim=0)
+        norm = get_norms(kernel_j)[0]
+        dist = torch_distance(Z, Z, norm, matrix=False)
+        bandwidths = compute_bandwidths(dist, n_bandwidth)
+
+        # Compute all permuted MMD estimates
+        kernel_count += 1
+        for i in range(n_bandwidth):
+            bandwidth = bandwidths[i]
+            pairwise_matrix = torch_distance(Z, Z, norm)
+            if norm == 1:
+                K = kernel_matrix(pairwise_matrix, kernel_j, bandwidth, scale=True)
+            else:
+                K = kernel_matrix(pairwise_matrix, kernel_j, bandwidth)
+
+            # Set diagonal elements to zero
+            K.fill_diagonal_(0)
+            
+            # Compute standard deviation
+            unscaled_std = torch.sqrt(torch.sum(K**2))
+
+            # Compute MMD permuted values
+            M[n_bandwidth * j + i] = (
+                torch.sum(V10 * (K @ V10), dim=0) * (n - m + 1) * (n - 1) / (m * (m - 1)) +
+                torch.sum(V01 * (K @ V01), dim=0) * (m - n + 1) / m +
+                torch.sum(V11 * (K @ V11), dim=0) * (n - 1) / m
+            ) / unscaled_std * np.sqrt(n * (n - 1))
+
+
+    mmd_values = torch.logsumexp(M, dim=0) + torch.log(torch.tensor(1.0/N))
+    mmd_value = mmd_values[-1]
+    p_value = (mmd_values[:-1] >= mmd_value).float().mean().item()
+
+    return p_value, mmd_value
+
+def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
+    # print(X)
+    B1 = n_perm
+    B2 = n_perm
+    B3 = 50
     device = X.device
     kernel_bandwidths_l_list = []
 
@@ -113,61 +207,25 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
             kernel_bandwidths_l_list.append((kernel, bandwidths, norm))
     # print(kernel_bandwidths_l_list)
     weights = create_weights(n_bandwidth) / len(kernel_bandwidths_l_list)
-    V11, V10, V01 = permute_data(len(X), len(Y), seed, B1, B2, device)
+    if is_permuted:
+        # Permutation test
+        V11, V10, V01 = permute_data(len(X), len(Y), seed, B1, B2, device, is_jax)
+    else:
+        # Wild bootstrap
+        R = wild_bootstrap(len(X), len(Y), seed, B1, B2, device, is_jax)
 
     # Step 1: compute all simulated MMD estimates (efficient as in Appendix C in MMD-Agg paper)
-    N = n_bandwidth * len(kernel_bandwidths_l_list)
-    M = torch.zeros((N, B1 + B2 + 1))
-    last_norm_computed = 0
-    for j in range(len(kernel_bandwidths_l_list)):
-        kernel, bandwidths, norm = kernel_bandwidths_l_list[j]
-        """ Since kernel_bandwidths_l_list is ordered "l1" first, "l2" second
-            compute pairwise matrices the minimum amount of time
-            store only one pairwise matrix at once """
-        if norm != last_norm_computed:
-            Z = torch.cat([X, Y], dim=0)
-            pairwise_matrix = torch_distance(Z, Z, norm)
-            last_norm_computed = norm
-        for i in range(n_bandwidth):
-            K = kernel_matrix(pairwise_matrix, kernel, bandwidths[i], True)
+    if is_permuted:
+        M = generate_mmd_matrix(X, Y, kernel_bandwidths_l_list,
+                                n_bandwidth, B1, B2, [V11, V10, V01], is_permuted)
+    else:
+        M = generate_mmd_matrix(X, Y, kernel_bandwidths_l_list, n_bandwidth, B1, B2, [R], is_permuted)
 
-            # Set diagonal elements to zero
-            K.fill_diagonal_(0)
-
-            # Compute MMD permuted values
-            M[n_bandwidth * j + i] = (
-                torch.sum(V10 * (K @ V10), dim=0) * (n - m + 1) / (m * n * (m - 1)) +
-                torch.sum(V01 * (K @ V01), dim=0) * (m - n + 1) / (m * n * (n - 1)) +
-                torch.sum(V11 * (K @ V11), dim=0) / (m * n)
-            )
     mmd_values = M[:, B1].clone()
     M1_sorted = torch.sort(M[:, :B1+1], dim=1)[0]
-    M2 = M[:, B1+1:]
 
     # Step 2: compute u_alpha_hat using the bisection method
-    quantiles = torch.zeros((N, 1))
-    u_min = 0
-    u_max = torch.min(1/weights)
-    for _ in range(B3):
-        u = (u_max + u_min) / 2
-        for j in range(len(kernel_bandwidths_l_list)):
-            for i in range(n_bandwidth):
-                idx = (torch.ceil(
-                    (B1 + 1) * (1 - u * weights[i])) - 1).to(torch.long)
-                quantiles[n_bandwidth * j +
-                          i] = M1_sorted[n_bandwidth * j + i, idx]
-
-        P_u = torch.sum(torch.max(M2 - quantiles, dim=0)[0] > 0) / B2
-
-        # Single line condition using torch.where
-        u_min, u_max = torch.where(P_u <= alpha, torch.tensor(
-            [u, u_max]), torch.tensor([u_min, u]))
-    u = u_min
-    for j in range(len(kernel_bandwidths_l_list)):
-        for i in range(n_bandwidth):
-            idx = (torch.ceil((B1 + 1) * (1 - u * weights[i])).long() - 1)
-            quantiles[n_bandwidth * j +
-                      i] = M1_sorted[n_bandwidth * j + i, idx]
+    u, _ = compute_u(M, kernel_bandwidths_l_list, n_bandwidth, B1, B2, B3, weights, alpha)
 
     # Step 3: output test result
     p_vals = torch.mean(
@@ -178,17 +236,41 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed):
             all_weights[n_bandwidth * j + i] = weights[i]
     thresholds = u * all_weights
 
+    # print(p_vals, thresholds)
     # Calculate scaled p-values
     scaled_p_vals = p_vals * (alpha / thresholds)
+    # print(scaled_p_vals)
 
     min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
     mmd_value = mmd_values[min_idx]
     return min_p_value, mmd_value
 
 
-def deep(X, Y):
-    return 0, 0
+def deep(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default_model, data_type):
+    X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
+
+    model, history, params = train_deep(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
+                                max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model, data_type=data_type)
+    
+    if is_history:
+        fig = plot_training_history(history)
+        plt.show()
+
+    p_value, mmd_value = p_value, mmd_value = mmd_permutation_test(
+        X_te, Y_te, n_perm, "deep", params + [model], data_type=data_type)
+    
+    return p_value, mmd_value
 
 
-def clf(X, Y):
-    return 0, 0
+def clf(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, is_label, default_model):
+    X_tr, X_te, Y_tr, Y_te = split_datasets(X, Y, train_ratio=train_ratio)
+
+    model, history = train_clf(X_tr, Y_tr, val_ratio=0.1, batch_size=128,
+                      max_epoch=2000, lr=1e-3, patience=patience, model=model, is_log=is_log, default_model=default_model)
+    
+    if is_history:
+        fig = plot_training_history(history)
+        plt.show()
+
+    p_value, mmd_value = test_clf(X_te, Y_te, n_perm, model, is_label, default_model)
+    return p_value, mmd_value
