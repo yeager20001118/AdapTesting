@@ -99,5 +99,5 @@ Performance evaluations and benchmarks across tabular, image, and text data can 
 This work is done by
 - Xunye Tian (UOM), [xunyetian.ml@gmail.com](xunyetian.ml@gmail.com)
 - Zhijian Zhou (UOM), [zhijianzhou.ml@gmail.com](zhijianzhou.ml@gmail.com)
-- Dr. Feng Liu (UOM), [fengliu.ml@gmail.com](fengliu.ml@gmail.com)
+- [Dr. Feng Liu](https://fengliu90.github.io/) (UOM), [fengliu.ml@gmail.com](fengliu.ml@gmail.com)
 
