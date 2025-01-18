@@ -4,12 +4,11 @@
 
 [![arXiv](https://img.shields.io/badge/arXiv-1234.56789-red.svg)](https://arxiv.org/abs/1234.56789)
 [![Papers with Code](https://img.shields.io/badge/Papers%20with%20Code-Statistical%20Testing-brightgreen.svg)](https://paperswithcode.com/task/statistical-hypothesis-testing)
-<!-- [![Conference](https://img.shields.io/badge/Pub-ICML25-blue.svg)](https://icml.cc/2025) -->
 [![Status](https://img.shields.io/badge/Status-Unpublished-orange.svg)]()
 [![Python](https://img.shields.io/badge/python-%3E%3D3.9-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/pytorch-%3E%3D2.1-blue.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
+<!-- [![Conference](https://img.shields.io/badge/Pub-ICML25-blue.svg)](https://icml.cc/2025) -->
 </div>
 
 ## Introduction
