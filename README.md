@@ -13,7 +13,7 @@
 
 ## Introduction
 
-![](src/AdapTesting Logo2.png)
+[![](src/AdapTesting Logo2.png)]
 
 Hypothesis testing serves as a fundamental statistical tool in machine learning (two-sample testing, independence testing, etc.). Despite its importance, current implementations face significant challenges: fragmented code across different languages and frameworks, lack of unified standards, and complex integration processes requiring users to download, understand, and modify multiple source code repositories.
 
