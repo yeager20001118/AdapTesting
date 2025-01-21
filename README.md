@@ -4,7 +4,7 @@
 
 <div align="center">
 
-# AdapTesting (Data Adaptive Hypothesis Testing Toolbox)
+# AdapTesting: A Data Adaptive Hypothesis Testing Toolbox
 
 [![arXiv](https://img.shields.io/badge/arXiv-1234.56789-red.svg)](https://arxiv.org/abs/1234.56789)
 [![Papers with Code](https://img.shields.io/badge/Papers%20with%20Code-Statistical%20Testing-brightgreen.svg)](https://paperswithcode.com/task/hypothesis-testing)
