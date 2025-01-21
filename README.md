@@ -1,6 +1,6 @@
  <table border="0">
  <tr>
-    <td width="150"><img src="./src/AdapTesting Logo2.jpg" alt="AdapTesting Logo" width="150"/></td>
+    <td width="150"><img src="./src/newlogo-removebg2.jpg" alt="AdapTesting Logo" width="150"/></td>
     <td align="center"><h1>AdapTesting (A Data Adaptive Hypothesis Testing Toolbox)</h1></td>
  </tr>
 </table>
