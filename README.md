@@ -2,7 +2,7 @@
  <tr>
     <td width="200"><img src="./src/newlogo-removebg1.png" alt="AdapTesting Logo" width="200"/></td>
     <td align="center">
-     <h1>AdapTesting: A Data Adaptive Hypothesis Testing Toolbox</h1>
+     <h1>AdapTesting: A Data-adaptive Hypothesis Testing Toolbox</h1>
     </td>
  </tr>
 </table>
