@@ -1,3 +1,7 @@
+<p align="center">
+    <img src="./src/AdapTesting Logo2.jpg" alt="AdapTesting Logo" width="150"/>
+</p>
+
 <div align="center">
 
 # AdapTesting (Data Adaptive Hypothesis Testing Toolbox)
