@@ -13,8 +13,6 @@
 
 ## Introduction
 
-[![](src/AdapTesting Logo2.png)]
-
 Hypothesis testing serves as a fundamental statistical tool in machine learning (two-sample testing, independence testing, etc.). Despite its importance, current implementations face significant challenges: fragmented code across different languages and frameworks, lack of unified standards, and complex integration processes requiring users to download, understand, and modify multiple source code repositories.
 
 To address these challenges, we present ***AdapTesting***, a comprehensive toolbox that unifies state-of-the-art hypothesis testing methods for machine learning applications. Our toolbox simplifies the testing process to its essence: users only need to provide their data and optionally specify the desired testing method name (as we provide the default method for both time-efficiency and power-generability) to receive comprehensive results, including result of testing, p-values, and test statistics. By standardizing implementation in Python and PyTorch frameworks, we ensure GPU-accelerated computations across different computing systems while maintaining a consistent interface.
