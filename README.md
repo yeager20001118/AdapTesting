@@ -31,13 +31,13 @@ Our initial release focuses on implementing comprehensive two-sample testing met
 
 #### Installation
 
-You can install using `pip` from [PyPI](https://pypi.org/) after we release and publish it:
-```bash
-pip install adaptesting
-```
-or install and access it locally:
+You can install using `pip` and access it locally:
 ```bash
 pip install git+https://github.com/yeager20001118/AdapTesting
+```
+or install it from [PyPI](https://pypi.org/) after we release and publish it:
+```bash
+pip install adaptesting
 ```
 
 #### Example usage of Two-sample Testing
