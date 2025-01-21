@@ -1,13 +1,10 @@
- <table border="0">
- <tr>
-    <td width="200"><img src="./src/newlogo-removebg1.png" alt="AdapTesting Logo" width="200"/></td>
-    <td align="center">
-     <h1>AdapTesting: A Data-adaptive Hypothesis Testing Toolbox</h1>
-    </td>
- </tr>
-</table>
+<div align="center">
+ <img align="left" width="150" src="./src/newlogo-removebg1.png">
+ <h1> <br>AdapTesting: A Data-adaptive Hypothesis Testing Toolbox <br> <br></h1>
+</div>
 
- <div align="center"> 
+
+<div align="center"> 
 
 [![arXiv](https://img.shields.io/badge/arXiv-1234.56789-red.svg)](https://arxiv.org/abs/1234.56789)
 [![Papers with Code](https://img.shields.io/badge/Papers%20with%20Code-Statistical%20Testing-brightgreen.svg)](https://paperswithcode.com/task/hypothesis-testing)
