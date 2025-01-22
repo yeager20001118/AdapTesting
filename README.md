@@ -1,5 +1,5 @@
 <div align="center">
- <img align="left" width="200" src="./src/newlogo-removebg1.png">
+ <img align="left" width="225" src="./src/newlogo-removebg1.png">
  <h1> <br>AdapTesting: A Data-adaptive Hypothesis Testing Toolbox <br> <br></h1>
 </div>
 
