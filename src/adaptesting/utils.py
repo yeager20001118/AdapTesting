@@ -181,56 +181,58 @@ def mmd_u(K, n, m, is_var=False):
     return mmd_u_squared
 
 
-def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0, data_type="tabular"):
+def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0, data_type="tabular", default_model=False):
     """Perform MMD permutation test and return the p-value."""
 
-    if kernel == "gaussian":
-        bandwidth = params[0]
-    elif kernel == "laplace":
+    if kernel in ["gaussian", "laplace"]:
         bandwidth = params[0]
     elif kernel == "deep":
         c_epsilon, b_q, b_phi, model = params
 
     norm = get_norms(kernel)[0]
 
+    # Concatenate the two samples
     Z = torch.cat((X, Y))
-    pairwise_matrix = torch_distance(Z, Z, norm)
     n = len(X)
     m = len(Y)
 
-    # Compute the Kernel matrix
+    # Compute the pairwise distance matrix for the full data
+    pairwise_matrix = torch_distance(Z, Z, norm)
+
+    # Compute the full kernel matrix K once
     if kernel == "deep":
         if data_type == 'tabular':
-            f = stack_representation(model)
+            if default_model:
+                f = stack_representation(model)
+                fz = f(Z)[0]
+            else:
+                f = model
+                fz = f(Z)
         else:
             f = model
-        fz = f(Z)[0]
+            fz = f(Z)
         epsilon = torch.sigmoid(c_epsilon)
         pairwise_matrix_f = torch_distance(fz, fz, norm)
         K_q = gaussian_kernel(pairwise_matrix, b_q)
         K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-        K = (1-epsilon) * K_phi * K_q + epsilon * K_q
+        K = (1 - epsilon) * K_phi * K_q + epsilon * K_q
     else:
         K = kernel_matrix(pairwise_matrix, kernel, bandwidth)
 
+    # Compute the observed MMD
     observed_mmd = mmd_u(K, n, m)
+    # print("Observed MMD:", observed_mmd)
+
     count = 0
-    # torch.manual_seed(kk+10)
+    # For each permutation, simply reorder the precomputed kernel matrix
     for _ in range(num_permutations):
         perm = torch.randperm(Z.size(0), device=Z.device)
-        perm_X = Z[perm[:n]]
-        perm_Y = Z[perm[n:]]
-        perm_Z = torch.cat((perm_X, perm_Y))
-        pairwise_matrix = torch_distance(perm_Z, perm_Z, norm)
-        if kernel == "deep":
-            fz = f(perm_Z)[0]
-            pairwise_matrix_f = torch_distance(fz, fz, norm)
-            K_q = gaussian_kernel(pairwise_matrix, b_q)
-            K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-            K_perm = (1-epsilon) * K_phi * K_q + epsilon * K_q
-        else:
-            K_perm = kernel_matrix(pairwise_matrix, kernel, bandwidth)
+        # Use the permutation to index into K:
+        K_perm = K[perm][:, perm]
+
+        # Compute the MMD statistic for the permuted kernel matrix
         perm_mmd = mmd_u(K_perm, n, m)
+        # print("Permuted MMD:", perm_mmd)
         if perm_mmd >= observed_mmd:
             count += 1
 
