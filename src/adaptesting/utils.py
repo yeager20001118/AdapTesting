@@ -198,19 +198,18 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
 
     # Compute the pairwise distance matrix for the full data
     pairwise_matrix = torch_distance(Z, Z, norm)
-
     # Compute the full kernel matrix K once
     if kernel == "deep":
-        if data_type == 'tabular':
-            if default_model:
+        if default_model:
+            if data_type == 'tabular':
                 f = stack_representation(model)
-                fz = f(Z)[0]
             else:
                 f = model
-                fz = f(Z)
+            fz = f(Z)[0]
         else:
             f = model
             fz = f(Z)
+
         epsilon = torch.sigmoid(c_epsilon)
         pairwise_matrix_f = torch_distance(fz, fz, norm)
         K_q = gaussian_kernel(pairwise_matrix, b_q)
