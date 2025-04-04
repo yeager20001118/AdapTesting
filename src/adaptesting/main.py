@@ -115,7 +115,7 @@ def tst(
     else:
         raise ValueError("Unsupported test type")
 
-    if p_value < alpha:
+    if p_value <= alpha:
         h = 1
         print(f"Reject the null hypothesis with p-value: {p_value}, "
               f"the MMD value is {mmd_value}.")

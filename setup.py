@@ -19,6 +19,7 @@ setup(
         "typing",
         "jax",
         "pytorch_tabnet",
+        "transformers",
     ],
     classifiers=[
         "Programming Language :: Python :: 3.9",

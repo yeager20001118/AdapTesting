@@ -25,7 +25,9 @@ class DefaultImageModel(nn.Module):
         # Load base ResNet with new weights parameter
         if weights == 'DEFAULT':
             weights = torchvision.models.ResNet18_Weights.DEFAULT
-        self.resnet = torchvision.models.resnet18(weights=weights)
+            self.resnet = torchvision.models.resnet18(weights=weights)
+        else:
+            self.resnet = torchvision.models.resnet18(weights=None)
 
         # Modify input layer if needed
         if n_channels != 3:
@@ -765,8 +767,8 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
         f = model
         fx, fy = f(X), f(Y)
 
-    b_q = get_median_bandwidth(X, Y, 'gaussian').clone()
-    b_phi = get_median_bandwidth(fx, fy, 'gaussian').clone()
+    b_q = get_median_bandwidth(X, Y, 'gaussian').clone() # change to X[:100], Y[:100] if large dataset
+    b_phi = get_median_bandwidth(fx, fy, 'gaussian').clone() # change to fx[:100], fy[:100] if large dataset
     
     c_epsilon = torch.tensor(1.0).to(device)
     b_q = torch.nn.Parameter(b_q)

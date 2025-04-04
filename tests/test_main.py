@@ -14,6 +14,13 @@ mvn2 = MultivariateNormal(mean, cov2)
 torch.manual_seed(0)
 random.seed(0)
 
+if torch.cuda.is_available():
+    device = torch.device("cuda:0")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+
 counter = 0
 n_trial = 100
 n_samples = 250
@@ -40,11 +47,11 @@ for _ in range(n_trial):
     X = Z1[X_indices]
     Y = Z2[X_indices]
 
-    h, _ = tst(X, Y, device = "cuda") # default method is median heuristic
-    # h, _ = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
-    # h, _ = tst(X, Y, device="cuda", method="agg", n_perm=3000)
-    # h, _ = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
-    # h, _ = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
+    h, _, _ = tst(X, Y, device=device)  # default method is median heuristic
+    # h, _, _ = tst(X, Y, device=device, method="fuse", kernel="laplace_gaussian", n_perm=2000)
+    # h, _, _ = tst(X, Y, device=device, method="agg", n_perm=3000)
+    # h, _, _ = tst(X, Y, device=device, method="clf", data_type="tabular", patience=150, n_perm=200)
+    # h, _, _ = tst(X, Y, device=device, method="deep", data_type="tabular", patience=150, n_perm=200)
     counter += h
     break
 
