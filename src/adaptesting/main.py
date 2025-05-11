@@ -257,7 +257,7 @@ def deep(X, Y, n_perm, model, train_ratio, patience, is_log, is_history, default
         plt.show()
 
     p_value, mmd_value = p_value, mmd_value = mmd_permutation_test(
-        X_te, Y_te, n_perm, "deep", params + [model], data_type=data_type)
+        X_te, Y_te, n_perm, "deep", params + [model], data_type=data_type, default_model=default_model)
     
     return p_value, mmd_value
 
