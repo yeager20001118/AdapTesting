@@ -10,4 +10,9 @@ src/adaptesting.egg-info/SOURCES.txt
 src/adaptesting.egg-info/dependency_links.txt
 src/adaptesting.egg-info/requires.txt
 src/adaptesting.egg-info/top_level.txt
+src/adaptesting/datasets/__init__.py
+src/adaptesting/datasets/base.py
+src/adaptesting/datasets/image.py
+src/adaptesting/datasets/tabular.py
+src/adaptesting/datasets/text.py
 tests/test_main.py

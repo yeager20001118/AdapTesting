@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
-from pytorch_tabnet.tab_network import TabNetNoEmbeddings
 import torchvision
 import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
@@ -10,6 +9,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from .constants import *
 from transformers import RobertaModel, RobertaTokenizer
+import pandas as pd
+from autogluon.tabular import TabularDataset, TabularPredictor
 
 #########################################################################################################
 
@@ -25,7 +26,9 @@ class DefaultImageModel(nn.Module):
         # Load base ResNet with new weights parameter
         if weights == 'DEFAULT':
             weights = torchvision.models.ResNet18_Weights.DEFAULT
-        self.resnet = torchvision.models.resnet18(weights=weights)
+            self.resnet = torchvision.models.resnet18(weights=weights)
+        else:
+            self.resnet = torchvision.models.resnet18(weights=None)
 
         # Modify input layer if needed
         if n_channels != 3:
@@ -45,10 +48,66 @@ class DefaultImageModel(nn.Module):
         self.resnet.fc = nn.Linear(num_features, 100)
 
     def forward(self, x):
-        output = self.resnet(x)
-        # Return both output and a zero sparse loss to match TabNet interface
-        sparse_loss = torch.tensor(0.0, device=x.device)
-        return output, sparse_loss
+        return self.resnet(x)
+
+
+class MitraTabularModel(nn.Module):
+    
+    def __init__(self, input_dim, output_dim=2, device='cpu'):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim 
+        self.device = device
+        self.predictor = None
+        self.is_fitted = False
+        
+        # Create a simple linear layer as placeholder for representation learning
+        self.representation_layer = nn.Linear(input_dim, min(max(16, input_dim // 2), input_dim * 4))
+        self.classifier_layer = nn.Linear(min(max(16, input_dim // 2), input_dim * 4), output_dim)
+        
+    def fit(self, X, y):
+        """Fit the MITRA model using AutoGluon"""
+        # Convert tensors to pandas DataFrame
+        X_np = X.detach().cpu().numpy()
+        y_np = y.detach().cpu().numpy()
+        
+        # Create feature names
+        feature_names = [f'feature_{i}' for i in range(X_np.shape[1])]
+        
+        # Create DataFrame
+        df = pd.DataFrame(X_np, columns=feature_names)
+        df['target'] = y_np
+        
+        # Convert to TabularDataset
+        train_data = TabularDataset(df)
+        
+        # Create predictor with Mitra
+        self.predictor = TabularPredictor(label='target')
+        self.predictor.fit(
+            train_data,
+            hyperparameters={
+                'MITRA': {'fine_tune': False}
+            },
+        )
+        self.is_fitted = True
+        
+    def forward(self, x):
+        if not self.is_fitted:
+            # For training/deep method: return representation
+            return self.representation_layer(x)
+        else:
+            # For clf method: return classification probabilities
+            x_np = x.detach().cpu().numpy()
+            feature_names = [f'feature_{i}' for i in range(x_np.shape[1])]
+            df = pd.DataFrame(x_np, columns=feature_names)
+            test_data = TabularDataset(df)
+            
+            # Get prediction probabilities
+            pred_proba = self.predictor.predict_proba(test_data)
+            
+            # Convert back to torch tensor
+            return torch.tensor(pred_proba.values, dtype=torch.float32, device=self.device)
+
 
 def check_shapes_and_adjust(X, Y):
     # Check if X and Y have the same length
@@ -181,56 +240,50 @@ def mmd_u(K, n, m, is_var=False):
     return mmd_u_squared
 
 
-def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0, data_type="tabular"):
+def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[1.0], kk=0, data_type="tabular", default_model=False):
     """Perform MMD permutation test and return the p-value."""
 
-    if kernel == "gaussian":
-        bandwidth = params[0]
-    elif kernel == "laplace":
+    if kernel in ["gaussian", "laplace"]:
         bandwidth = params[0]
     elif kernel == "deep":
         c_epsilon, b_q, b_phi, model = params
 
     norm = get_norms(kernel)[0]
 
+    # Concatenate the two samples
     Z = torch.cat((X, Y))
-    pairwise_matrix = torch_distance(Z, Z, norm)
     n = len(X)
     m = len(Y)
 
-    # Compute the Kernel matrix
+    # Compute the pairwise distance matrix for the full data
+    pairwise_matrix = torch_distance(Z, Z, norm)
+    # Compute the full kernel matrix K once
     if kernel == "deep":
-        if data_type == 'tabular':
-            f = stack_representation(model)
-        else:
-            f = model
-        fz = f(Z)[0]
+        f = model
+        fz = f(Z)
+
         epsilon = torch.sigmoid(c_epsilon)
         pairwise_matrix_f = torch_distance(fz, fz, norm)
         K_q = gaussian_kernel(pairwise_matrix, b_q)
         K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-        K = (1-epsilon) * K_phi * K_q + epsilon * K_q
+        K = (1 - epsilon) * K_phi * K_q + epsilon * K_q
     else:
         K = kernel_matrix(pairwise_matrix, kernel, bandwidth)
 
+    # Compute the observed MMD
     observed_mmd = mmd_u(K, n, m)
+    # print("Observed MMD:", observed_mmd)
+
     count = 0
-    # torch.manual_seed(kk+10)
+    # For each permutation, simply reorder the precomputed kernel matrix
     for _ in range(num_permutations):
         perm = torch.randperm(Z.size(0), device=Z.device)
-        perm_X = Z[perm[:n]]
-        perm_Y = Z[perm[n:]]
-        perm_Z = torch.cat((perm_X, perm_Y))
-        pairwise_matrix = torch_distance(perm_Z, perm_Z, norm)
-        if kernel == "deep":
-            fz = f(perm_Z)[0]
-            pairwise_matrix_f = torch_distance(fz, fz, norm)
-            K_q = gaussian_kernel(pairwise_matrix, b_q)
-            K_phi = gaussian_kernel(pairwise_matrix_f, b_phi)
-            K_perm = (1-epsilon) * K_phi * K_q + epsilon * K_q
-        else:
-            K_perm = kernel_matrix(pairwise_matrix, kernel, bandwidth)
+        # Use the permutation to index into K:
+        K_perm = K[perm][:, perm]
+
+        # Compute the MMD statistic for the permuted kernel matrix
         perm_mmd = mmd_u(K_perm, n, m)
+        # print("Permuted MMD:", perm_mmd)
         if perm_mmd >= observed_mmd:
             count += 1
 
@@ -239,7 +292,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
 
 
 def sentences_to_embeddings(sentences, device):
-    model = RobertaModel.from_pretrained('roberta-base').to(device)
+    model = RobertaModel.from_pretrained('roberta-base', add_pooling_layer=False).to(device)
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     # Tokenize all sentences (batch processing)
     encoded_input = tokenizer(
@@ -550,7 +603,6 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
     best_val_loss = float('inf')
     best_model_state = None
     patience_counter = 0
-    lambda_sparse = 1e-3
 
     for epoch in range(max_epoch):
         # Training phase
@@ -560,22 +612,15 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
             optimizer.zero_grad()
             # print(next(model.parameters()).is_cuda)
             # print(X_batch.is_cuda)
-            if default_model:
-                outputs, M_loss = model(X_batch)
-            else:
-                outputs = model(X_batch)
-                M_loss = 0
+            outputs = model(X_batch)
                 # loss = criterion(outputs, y_batch)
-            loss = criterion(outputs, y_batch) + lambda_sparse * M_loss
+            loss = criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
             train_losses.append(loss.item())
 
         if is_log and (epoch+1) % patience == 0:
-            if default_model:
-                print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr)[0], y_tr))
-            else:
-                print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr), y_tr))
+            print(f"Epoch {epoch+1}' training loss: ", criterion(model(Z_tr), y_tr))
 
         # Validation phase
         model.eval()
@@ -584,10 +629,7 @@ def train_clf(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_lo
         total = 0
 
         with torch.no_grad():
-            if default_model:
-                outputs = model(Z_val)[0]
-            else:
-                outputs = model(Z_val)
+            outputs = model(Z_val)
             loss = criterion(outputs, y_val)
             val_losses.append(loss.item())
 
@@ -683,10 +725,7 @@ def test_clf(X, Y, n_perm, model, is_label, default_model):
     Z = torch.cat([X, Y], dim=0)
     n_total = Z.size(0)
 
-    if default_model:
-        outputs = model(Z)[0]
-    else:
-        outputs = model(Z)
+    outputs = model(Z)
     outputs = torch.nn.Softmax(dim=1)(outputs)
     if is_label:
         outputs = outputs.max(1, keepdim=True)[1]
@@ -712,11 +751,6 @@ def test_clf(X, Y, n_perm, model, is_label, default_model):
 
 ################################### Helper functions for MMD-Deep #######################################
 
-def stack_representation(model):
-    def feature_extractor(x):
-        steps_output, M_Loss = model(x)
-        return torch.stack(steps_output, dim=0).mean(dim=0), M_Loss
-    return feature_extractor
 
 def deep_objective(fz, Z, epsilon, b_q, b_phi, n_samples):
 
@@ -754,18 +788,11 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
     dtype = torch.float32
     n_samples = X.size(0)
     
-    if default_model:
-        if data_type == 'tabular':
-            f = stack_representation(model)
-        else:
-            f = model
-        fx, fy = f(X)[0], f(Y)[0]
-    else:
-        f = model
-        fx, fy = f(X), f(Y)
+    f = model
+    fx, fy = f(X), f(Y)
 
-    b_q = get_median_bandwidth(X, Y, 'gaussian').clone()
-    b_phi = get_median_bandwidth(fx, fy, 'gaussian').clone()
+    b_q = get_median_bandwidth(X, Y, 'gaussian').clone() # change to X[:100], Y[:100] if large dataset
+    b_phi = get_median_bandwidth(fx, fy, 'gaussian').clone() # change to fx[:100], fy[:100] if large dataset
     
     c_epsilon = torch.tensor(1.0).to(device)
     b_q = torch.nn.Parameter(b_q)
@@ -804,7 +831,6 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
     best_val_loss = float('inf')
     best_model_state = None
     patience_counter = 0
-    lambda_sparse = 1e-3
 
     for epoch in range(max_epoch):
         
@@ -815,26 +841,18 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
             Z_batch = torch.cat([X_batch, Y_batch], dim=0)
             optimizer.zero_grad()
             epsilon = torch.sigmoid(c_epsilon)
-            if default_model:
-                fz, M_loss = f(Z_batch)
-            else:
-                fz = f(Z_batch)
-                M_loss = 0
+            fz = f(Z_batch)
             # print(fz)
             n_samples = X_batch.size(0)
-            loss = deep_objective(fz, Z_batch, epsilon, b_q, b_phi, n_samples)[0] + lambda_sparse * M_loss
+            loss = deep_objective(fz, Z_batch, epsilon, b_q, b_phi, n_samples)[0]
             # print("Loss:", loss)
             loss.backward()
             optimizer.step()
             train_losses.append(loss.item())
             
         if is_log and (epoch+1) % patience == 0:
-            if default_model:
-                print(f"Epoch {epoch+1}' J stats: ",
-                      -1 * deep_objective(f(Z_tr)[0], Z_tr, epsilon, b_q, b_phi, n_samples_tr)[0].item())
-            else:
-                print(f"Epoch {epoch+1}' J stats: ",
-                      -1 * deep_objective(f(Z_tr), Z_tr, epsilon, b_q, b_phi, n_samples_tr)[0].item())
+            print(f"Epoch {epoch+1}' J stats: ",
+                  -1 * deep_objective(f(Z_tr), Z_tr, epsilon, b_q, b_phi, n_samples_tr)[0].item())
         
         # Validation phase
         model.eval()
@@ -843,10 +861,7 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
         with torch.no_grad():
             epsilon = torch.sigmoid(c_epsilon)
             # f = stack_representation(model)
-            if default_model:
-                fz_val = f(Z_val)[0]
-            else:
-                fz_val = f(Z_val)
+            fz_val = f(Z_val)
             # print(fz_val)
             loss, mmd_value = deep_objective(
                 fz_val, Z_val, epsilon, b_q, b_phi, n_samples_val)

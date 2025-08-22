@@ -27,6 +27,7 @@ def tst(
             # Make sure the X and Y are both in the form of [str1, str2, ...]
             X = sentences_to_embeddings(X, device)
             Y = sentences_to_embeddings(Y, device)
+            data_type = "tabular"
         else:
             data_type = "tabular"
     
@@ -57,23 +58,11 @@ def tst(
         default_model = True
         if data_type == 'tabular':
             input_dim = X.size(1)
-            hidden_dim = min(max(16, input_dim // 2), input_dim * 4)
-            model = TabNetNoEmbeddings(
+            model = MitraTabularModel(
                 input_dim=input_dim,
                 output_dim=2,  # binary classification
-                n_d=hidden_dim,
-                n_a=hidden_dim,
-                n_steps=2,
-                gamma=1,
-                n_independent=1,
-                n_shared=1,
-                virtual_batch_size=128,
-                momentum=0.02
+                device=device
             ).to(device)
-            model.encoder.group_attention_matrix = model.encoder.group_attention_matrix.to(device)
-            if method == "deep":
-                # Deep method only need the representation layers' output
-                model = model.encoder
         elif data_type == 'image':
             n_channels = X.size(1)
             image_size = X.size(2) # assuming square images where size(2) = size(3)
