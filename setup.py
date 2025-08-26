@@ -20,6 +20,9 @@ setup(
         "jax",
         "pytorch_tabnet",
         "transformers",
+        "einops",
+        "datasets<4.0.0",
+        "torchattacks",
     ],
     classifiers=[
         "Programming Language :: Python :: 3.9",

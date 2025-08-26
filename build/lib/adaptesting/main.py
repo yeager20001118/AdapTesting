@@ -16,6 +16,7 @@ def tst(
         patience=50,
         seed=0,
         train_ratio=0.5,
+        output_round=4,
         is_jax=False,
         is_permuted=False,
         is_log = False,
@@ -106,12 +107,12 @@ def tst(
 
     if p_value <= alpha:
         h = 1
-        print(f"Reject the null hypothesis with p-value: {p_value}, "
-              f"the MMD value is {mmd_value}.")
+        print(f"Reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
+              f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
     else:
         h = 0
-        print(f"Fail to reject the null hypothesis with p-value: {p_value}, "
-              f"the MMD value is {mmd_value}.")
+        print(f"Fail to reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
+              f"the test statistics is for {method} is {mmd_value:.{output_round}f}.")
 
     return h, mmd_value, p_value
 

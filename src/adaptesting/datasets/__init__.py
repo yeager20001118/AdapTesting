@@ -16,20 +16,21 @@ __all__ = [
     'TSTDataset',
     # Challenging tabular datasets
     'HiggsBoson',
-    'AdultIncome', 
-    'ChallengingSynthetic',
+    # 'AdultIncome', 
+    # 'ChallengingSynthetic',
+    'HDGM',
     # Easy tabular datasets (for comparison)
-    'BreastCancer',
-    'Wine',
+    # 'BreastCancer',
+    # 'Wine',
     # Image datasets with real attacks
     'CIFAR10Adversarial',
-    'MNISTCorrupted',
-    'ImageNetAdversarial',
-    'NaturalImageShifts',
+    # 'MNISTCorrupted',
+    # 'ImageNetAdversarial',
+    # 'NaturalImageShifts',
     # Text datasets using real sources
     'HumanAIDetection',
     'HC3',
-    'FakeNewsDetection',
-    'DomainShift',
-    'SentimentShift'
+    # 'FakeNewsDetection',
+    # 'DomainShift',
+    # 'SentimentShift'
 ]

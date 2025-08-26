@@ -44,6 +44,41 @@ or install it from [PyPI](https://pypi.org/) after we release and publish it:
 pip install adaptesting
 ```
 
+As we are using the Mitra (tabular foundation model) by default, you have to install it by:
+```bash
+pip install uv
+uv pip install autogluon.tabular[mitra] 
+```
+
+#### Datasets for TST
+You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets. 
+```Python
+from adaptesting import datasets
+
+# Tabular HDGM datasets
+hdgm = datasets.HDGM(N=500, M=500, level="easy")
+X, Y = hdgm()
+# Visualize HDGM's first 2 dimension
+plt.plot(X[:, 0], X[:, 1], 'o')
+plt.plot(Y[:, 0], Y[:, 1], 'o')
+plt.show()
+```
+![Plot Output](./examples/hdgm_plot.png)
+
+```Python
+from adaptesting import datasets
+
+# Tabular Cifar10 VS Cifar10.adv datasets
+cifar_adv = datasets.CIFAR10Adversarial(N=100, M=100, attack_method='PGD')
+X, Y = cifar_adv()
+# Visualize HDGM's first 2 dimension
+plt.imshow(X[0].permute(1, 2, 0))
+plt.imshow(Y[0].permute(1, 2, 0))
+plt.show()
+```
+![Plot Output](./examples/cifar_adv_plot.png)
+
+
 #### Example usage of Two-sample Testing
 
 The detailed demo examples (for tabular, image and text data) can be found in the [examples](./examples) directory.
@@ -62,7 +97,7 @@ mvn1, mvn2 = MultivariateNormal(mean, cov1), MultivariateNormal(mean, cov2)
 X, Y = mvn1.sample((1000,)), mvn2.sample((1000,)) 
 
 # Five kinds of SOTA TST methods to choose：
-h, mmd_value, p_value = tst(X, Y, device="cuda") # Default method using median heuristic
+h, mmd_value, p_value = tst(X, Y, device="cuda") # Default method using median heuristic, device can be either "cuda", "cpu" or "mps"
 
 # Other available methods and their default arguments setting (uncomment to use):
 # h, mmd_value, p_value = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
@@ -73,13 +108,13 @@ h, mmd_value, p_value = tst(X, Y, device="cuda") # Default method using median h
 """
 Output of tst: 
     (result of testing: 0 or 1, 
-    mmd value of two samples, 
+    test statistics value of two samples, 
     p-value of testing)
 
 If testing the two samples are from different distribution, the console will output 
-    'Reject the null hypothesis with p-value: ..., the MMD value is ...'.
+    'Reject the null hypothesis with p-value: ..., the test statistics for {method} is ...'.
 Otherwise,
-    'Fail to reject the null hypothesis with p-value: ..., the MMD value is ...'.
+    'Fail to reject the null hypothesis with p-value: ..., the test statistics for {method} is ...'.
 """
 ```
 

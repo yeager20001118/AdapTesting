@@ -193,308 +193,304 @@ class CIFAR10Adversarial(ImageTSTDataset):
         return X, Y
 
 
-class MNISTCorrupted(ImageTSTDataset):
-    """
-    MNIST original vs corrupted images using MNIST-C dataset.
+# class MNISTCorrupted(ImageTSTDataset):
+#     """
+#     MNIST original vs corrupted images using MNIST-C dataset.
     
-    Uses the MNIST-C (MNIST Corrupted) dataset which contains various
-    types of corruption applied to MNIST images.
-    """
+#     Uses the MNIST-C (MNIST Corrupted) dataset which contains various
+#     types of corruption applied to MNIST images.
+#     """
     
-    def __init__(
-        self,
-        root: str = './data',
-        N: int = 1000,
-        M: int = 1000,
-        download: bool = True,
-        corruption_type: str = 'gaussian_noise',
-        severity: int = 3,
-        **kwargs
-    ):
-        """
-        Args:
-            corruption_type (str): Type of corruption ('gaussian_noise', 'shot_noise', 'impulse_noise',
-                                 'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur', 
-                                 'brightness', 'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression')
-            severity (int): Corruption severity level (1-5)
-        """
-        self.corruption_type = corruption_type
-        self.severity = severity
-        super().__init__(root, N, M, download, **kwargs)
+#     def __init__(
+#         self,
+#         root: str = './data',
+#         N: int = 1000,
+#         M: int = 1000,
+#         download: bool = True,
+#         corruption_type: str = 'gaussian_noise',
+#         severity: int = 3,
+#         **kwargs
+#     ):
+#         """
+#         Args:
+#             corruption_type (str): Type of corruption ('gaussian_noise', 'shot_noise', 'impulse_noise',
+#                                  'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur', 
+#                                  'brightness', 'contrast', 'elastic_transform', 'pixelate', 'jpeg_compression')
+#             severity (int): Corruption severity level (1-5)
+#         """
+#         self.corruption_type = corruption_type
+#         self.severity = severity
+#         super().__init__(root, N, M, download, **kwargs)
     
-    def _download(self):
-        # Download original MNIST
-        torchvision.datasets.MNIST(
-            root=self.root, 
-            train=True, 
-            download=True
-        )
+#     def _download(self):
+#         # Download original MNIST
+#         torchvision.datasets.MNIST(
+#             root=self.root, 
+#             train=True, 
+#             download=True
+#         )
         
-        # For MNIST-C, we'll implement basic corruptions
-        # In practice, you might download the actual MNIST-C dataset
-        print(f"Using MNIST with {self.corruption_type} corruption (severity {self.severity})")
+#         # For MNIST-C, we'll implement basic corruptions
+#         # In practice, you might download the actual MNIST-C dataset
+#         print(f"Using MNIST with {self.corruption_type} corruption (severity {self.severity})")
     
-    def _check_exists(self) -> bool:
-        mnist_path = os.path.join(self.root, 'MNIST')
-        return os.path.exists(mnist_path)
+#     def _check_exists(self) -> bool:
+#         mnist_path = os.path.join(self.root, 'MNIST')
+#         return os.path.exists(mnist_path)
     
-    def _apply_corruption(self, img: torch.Tensor) -> torch.Tensor:
-        """Apply corruption to image based on corruption type and severity."""
-        severity_factor = self.severity / 5.0  # Normalize to 0-1
+#     def _apply_corruption(self, img: torch.Tensor) -> torch.Tensor:
+#         """Apply corruption to image based on corruption type and severity."""
+#         severity_factor = self.severity / 5.0  # Normalize to 0-1
         
-        if self.corruption_type == 'gaussian_noise':
-            noise = torch.randn_like(img) * severity_factor * 0.5
-            return torch.clamp(img + noise, 0, 1)
+#         if self.corruption_type == 'gaussian_noise':
+#             noise = torch.randn_like(img) * severity_factor * 0.5
+#             return torch.clamp(img + noise, 0, 1)
         
-        elif self.corruption_type == 'shot_noise':
-            # Poisson noise
-            img_scaled = img * 255 * severity_factor
-            noisy = torch.poisson(img_scaled) / (255 * severity_factor)
-            return torch.clamp(noisy, 0, 1)
+#         elif self.corruption_type == 'shot_noise':
+#             # Poisson noise
+#             img_scaled = img * 255 * severity_factor
+#             noisy = torch.poisson(img_scaled) / (255 * severity_factor)
+#             return torch.clamp(noisy, 0, 1)
         
-        elif self.corruption_type == 'impulse_noise':
-            # Salt and pepper noise
-            mask = torch.rand_like(img) < severity_factor * 0.1
-            noise = torch.rand_like(img)
-            corrupted = torch.where(mask, noise, img)
-            return torch.clamp(corrupted, 0, 1)
+#         elif self.corruption_type == 'impulse_noise':
+#             # Salt and pepper noise
+#             mask = torch.rand_like(img) < severity_factor * 0.1
+#             noise = torch.rand_like(img)
+#             corrupted = torch.where(mask, noise, img)
+#             return torch.clamp(corrupted, 0, 1)
         
-        elif self.corruption_type == 'defocus_blur':
-            # Simple blur using average pooling
-            kernel_size = 2 + int(severity_factor * 3)
-            if kernel_size % 2 == 0:
-                kernel_size += 1
-            blurred = torch.nn.functional.avg_pool2d(
-                img.unsqueeze(0), 
-                kernel_size=kernel_size, 
-                stride=1, 
-                padding=kernel_size//2
-            ).squeeze(0)
-            return blurred
+#         elif self.corruption_type == 'defocus_blur':
+#             # Simple blur using average pooling
+#             kernel_size = 2 + int(severity_factor * 3)
+#             if kernel_size % 2 == 0:
+#                 kernel_size += 1
+#             blurred = torch.nn.functional.avg_pool2d(
+#                 img.unsqueeze(0), 
+#                 kernel_size=kernel_size, 
+#                 stride=1, 
+#                 padding=kernel_size//2
+#             ).squeeze(0)
+#             return blurred
         
-        elif self.corruption_type == 'brightness':
-            brightness_factor = 1.0 + (severity_factor - 0.5) * 2.0
-            return torch.clamp(img * brightness_factor, 0, 1)
+#         elif self.corruption_type == 'brightness':
+#             brightness_factor = 1.0 + (severity_factor - 0.5) * 2.0
+#             return torch.clamp(img * brightness_factor, 0, 1)
         
-        elif self.corruption_type == 'contrast':
-            mean = img.mean()
-            contrast_factor = 1.0 + severity_factor
-            return torch.clamp((img - mean) * contrast_factor + mean, 0, 1)
+#         elif self.corruption_type == 'contrast':
+#             mean = img.mean()
+#             contrast_factor = 1.0 + severity_factor
+#             return torch.clamp((img - mean) * contrast_factor + mean, 0, 1)
         
-        else:
-            # Default: Gaussian noise
-            noise = torch.randn_like(img) * severity_factor * 0.3
-            return torch.clamp(img + noise, 0, 1)
+#         else:
+#             # Default: Gaussian noise
+#             noise = torch.randn_like(img) * severity_factor * 0.3
+#             return torch.clamp(img + noise, 0, 1)
     
-    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Load MNIST
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-        ])
+#     def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+#         # Load MNIST
+#         transform = transforms.Compose([
+#             transforms.ToTensor(),
+#         ])
         
-        dataset = torchvision.datasets.MNIST(
-            root=self.root, 
-            train=True, 
-            transform=transform
-        )
+#         dataset = torchvision.datasets.MNIST(
+#             root=self.root, 
+#             train=True, 
+#             transform=transform
+#         )
         
-        # Sample random indices
-        np.random.seed(self.seed)
-        total_samples = min(self.N + self.M, len(dataset))
-        indices = np.random.choice(len(dataset), total_samples, replace=False)
+#         # Sample random indices
+#         np.random.seed(self.seed)
+#         total_samples = min(self.N + self.M, len(dataset))
+#         indices = np.random.choice(len(dataset), total_samples, replace=False)
         
-        # Get original images
-        original_images = []
-        for i in indices[:self.N]:
-            img, _ = dataset[i]
-            original_images.append(img)
+#         # Get original images
+#         original_images = []
+#         for i in indices[:self.N]:
+#             img, _ = dataset[i]
+#             original_images.append(img)
         
-        # Generate corrupted images
-        corrupted_images = []
-        for i in indices[self.N:self.N+self.M]:
-            img, _ = dataset[i]
-            corrupted_img = self._apply_corruption(img)
-            corrupted_images.append(corrupted_img)
+#         # Generate corrupted images
+#         corrupted_images = []
+#         for i in indices[self.N:self.N+self.M]:
+#             img, _ = dataset[i]
+#             corrupted_img = self._apply_corruption(img)
+#             corrupted_images.append(corrupted_img)
         
-        X = torch.stack(original_images)
-        Y = torch.stack(corrupted_images)
+#         X = torch.stack(original_images)
+#         Y = torch.stack(corrupted_images)
         
-        return X, Y
+#         return X, Y
 
 
-class ImageNetAdversarial(ImageTSTDataset):
-    """
-    ImageNet subset original vs adversarial examples.
+# class ImageNetAdversarial(ImageTSTDataset):
+#     """
+#     ImageNet subset original vs adversarial examples.
     
-    Uses a subset of ImageNet (or ImageNet-like dataset) and generates
-    adversarial examples using torchattacks with pretrained models.
-    """
+#     Uses a subset of ImageNet (or ImageNet-like dataset) and generates
+#     adversarial examples using torchattacks with pretrained models.
+#     """
     
-    def __init__(
-        self,
-        root: str = './data',
-        N: int = 500,
-        M: int = 500,
-        download: bool = True,
-        attack_method: str = 'PGD',
-        epsilon: float = 16/255,
-        image_size: int = 224,
-        subset_classes: int = 10,
-        **kwargs
-    ):
-        """
-        Args:
-            attack_method (str): Attack method ('FGSM', 'PGD', 'C&W', 'AutoAttack')
-            epsilon (float): Perturbation strength
-            image_size (int): Size to resize images to
-            subset_classes (int): Number of ImageNet classes to use
-        """
-        if not TORCHATTACKS_AVAILABLE:
-            print("Warning: torchattacks not available. Using simple noise perturbation.")
+#     def __init__(
+#         self,
+#         root: str = './data',
+#         N: int = 500,
+#         M: int = 500,
+#         download: bool = True,
+#         attack_method: str = 'PGD',
+#         epsilon: float = 16/255,
+#         image_size: int = 224,
+#         subset_classes: int = 10,
+#         **kwargs
+#     ):
+#         """
+#         Args:
+#             attack_method (str): Attack method ('FGSM', 'PGD', 'C&W', 'AutoAttack')
+#             epsilon (float): Perturbation strength
+#             image_size (int): Size to resize images to
+#             subset_classes (int): Number of ImageNet classes to use
+#         """
+#         if not TORCHATTACKS_AVAILABLE:
+#             print("Warning: torchattacks not available. Using simple noise perturbation.")
         
-        self.attack_method = attack_method
-        self.epsilon = epsilon
-        self.image_size = image_size
-        self.subset_classes = subset_classes
-        super().__init__(root, N, M, download, **kwargs)
+#         self.attack_method = attack_method
+#         self.epsilon = epsilon
+#         self.image_size = image_size
+#         self.subset_classes = subset_classes
+#         super().__init__(root, N, M, download, **kwargs)
     
-    def _download(self):
-        # Use CIFAR-10 as a proxy for ImageNet (easier to download)
-        # In practice, you might use actual ImageNet subset
-        torchvision.datasets.CIFAR10(
-            root=self.root, 
-            train=True, 
-            download=True
-        )
-        print("Using CIFAR-10 as ImageNet proxy for demonstration")
+#     def _download(self):
+#         # Use CIFAR-10 as a proxy for ImageNet (easier to download)
+#         # In practice, you might use actual ImageNet subset
+#         torchvision.datasets.CIFAR10(
+#             root=self.root, 
+#             train=True, 
+#             download=True
+#         )
+#         print("Using CIFAR-10 as ImageNet proxy for demonstration")
     
-    def _check_exists(self) -> bool:
-        cifar_path = os.path.join(self.root, 'cifar-10-batches-py')
-        return os.path.exists(cifar_path)
+#     def _check_exists(self) -> bool:
+#         cifar_path = os.path.join(self.root, 'cifar-10-batches-py')
+#         return os.path.exists(cifar_path)
     
-    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Load dataset (using CIFAR-10 as proxy)
-        transform = transforms.Compose([
-            transforms.Resize((self.image_size, self.image_size)),
-            transforms.ToTensor(),
-        ])
+#     def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+#         # Load dataset (using CIFAR-10 as proxy)
+#         transform = transforms.Compose([
+#             transforms.Resize((self.image_size, self.image_size)),
+#             transforms.ToTensor(),
+#         ])
         
-        dataset = torchvision.datasets.CIFAR10(
-            root=self.root, 
-            train=True, 
-            transform=transform
-        )
+#         dataset = torchvision.datasets.CIFAR10(
+#             root=self.root, 
+#             train=True, 
+#             transform=transform
+#         )
         
-        # Use pretrained ResNet
-        model = torchvision.models.resnet18(weights='IMAGENET1K_V1')
-        model.eval()
+#         # Use pretrained ResNet
+#         model = torchvision.models.resnet18(weights='IMAGENET1K_V1')
+#         model.eval()
         
-        # Sample data
-        np.random.seed(self.seed)
-        indices = np.random.choice(len(dataset), min(self.N + self.M, len(dataset)), replace=False)
+#         # Sample data
+#         np.random.seed(self.seed)
+#         indices = np.random.choice(len(dataset), min(self.N + self.M, len(dataset)), replace=False)
         
-        original_images = []
-        labels = []
+#         original_images = []
+#         labels = []
         
-        for i in indices[:self.N]:
-            img, label = dataset[i]
-            original_images.append(img)
-            labels.append(label)
+#         for i in indices[:self.N]:
+#             img, label = dataset[i]
+#             original_images.append(img)
+#             labels.append(label)
         
-        # Generate adversarial examples
-        if TORCHATTACKS_AVAILABLE and len(original_images) > 0:
-            batch_images = torch.stack(original_images)
-            batch_labels = torch.tensor(labels)
+#         # Generate adversarial examples
+#         if TORCHATTACKS_AVAILABLE and len(original_images) > 0:
+#             batch_images = torch.stack(original_images)
+#             batch_labels = torch.tensor(labels)
             
-            if self.attack_method == 'PGD':
-                attack = torchattacks.PGD(model, eps=self.epsilon, alpha=2/255, steps=10)
-            elif self.attack_method == 'FGSM':
-                attack = torchattacks.FGSM(model, eps=self.epsilon)
-            else:
-                attack = torchattacks.FGSM(model, eps=self.epsilon)
+#             if self.attack_method == 'PGD':
+#                 attack = torchattacks.PGD(model, eps=self.epsilon, alpha=2/255, steps=10)
+#             elif self.attack_method == 'FGSM':
+#                 attack = torchattacks.FGSM(model, eps=self.epsilon)
+#             else:
+#                 attack = torchattacks.FGSM(model, eps=self.epsilon)
             
-            adversarial_images = attack(batch_images, batch_labels)
-        else:
-            # Fallback: add noise
-            adversarial_images = []
-            for img in original_images[:self.M]:
-                noise = torch.randn_like(img) * self.epsilon
-                adv_img = torch.clamp(img + noise, 0, 1)
-                adversarial_images.append(adv_img)
-            adversarial_images = torch.stack(adversarial_images)
+#             adversarial_images = attack(batch_images, batch_labels)
+#         else:
+#             # Fallback: add noise
+#             adversarial_images = []
+#             for img in original_images[:self.M]:
+#                 noise = torch.randn_like(img) * self.epsilon
+#                 adv_img = torch.clamp(img + noise, 0, 1)
+#                 adversarial_images.append(adv_img)
+#             adversarial_images = torch.stack(adversarial_images)
         
-        X = torch.stack(original_images[:self.N])
-        Y = adversarial_images[:self.M]
+#         X = torch.stack(original_images[:self.N])
+#         Y = adversarial_images[:self.M]
         
-        return X, Y
+#         return X, Y
 
 
-class NaturalImageShifts(ImageTSTDataset):
-    """
-    Natural distribution shifts using real datasets.
+# class NaturalImageShifts(ImageTSTDataset):
+#     """
+#     Natural distribution shifts using real datasets.
     
-    Uses different datasets or different domains within a dataset
-    to represent natural distribution shifts.
-    """
+#     Uses different datasets or different domains within a dataset
+#     to represent natural distribution shifts.
+#     """
     
-    def __init__(
-        self,
-        root: str = './data',
-        N: int = 500,
-        M: int = 500,
-        download: bool = True,
-        shift_type: str = 'cifar10_cifar100',
-        **kwargs
-    ):
-        """
-        Args:
-            shift_type (str): Type of shift ('cifar10_cifar100', 'mnist_fashionmnist', etc.)
-        """
-        self.shift_type = shift_type
-        super().__init__(root, N, M, download, **kwargs)
+#     def __init__(
+#         self,
+#         root: str = './data',
+#         N: int = 500,
+#         M: int = 500,
+#         download: bool = True,
+#         shift_type: str = 'cifar10_cifar100',
+#         **kwargs
+#     ):
+#         """
+#         Args:
+#             shift_type (str): Type of shift ('cifar10_cifar100', 'mnist_fashionmnist', etc.)
+#         """
+#         self.shift_type = shift_type
+#         super().__init__(root, N, M, download, **kwargs)
     
-    def _download(self):
-        if 'cifar' in self.shift_type:
-            torchvision.datasets.CIFAR10(root=self.root, train=True, download=True)
-            torchvision.datasets.CIFAR100(root=self.root, train=True, download=True)
-        elif 'mnist' in self.shift_type:
-            torchvision.datasets.MNIST(root=self.root, train=True, download=True)
-            torchvision.datasets.FashionMNIST(root=self.root, train=True, download=True)
+#     def _download(self):
+#         if 'cifar' in self.shift_type:
+#             torchvision.datasets.CIFAR10(root=self.root, train=True, download=True)
+#             torchvision.datasets.CIFAR100(root=self.root, train=True, download=True)
+#         elif 'mnist' in self.shift_type:
+#             torchvision.datasets.MNIST(root=self.root, train=True, download=True)
+#             torchvision.datasets.FashionMNIST(root=self.root, train=True, download=True)
     
-    def _check_exists(self) -> bool:
-        if 'cifar' in self.shift_type:
-            return (os.path.exists(os.path.join(self.root, 'cifar-10-batches-py')) and
-                    os.path.exists(os.path.join(self.root, 'cifar-100-python')))
-        elif 'mnist' in self.shift_type:
-            return (os.path.exists(os.path.join(self.root, 'MNIST')) and
-                    os.path.exists(os.path.join(self.root, 'FashionMNIST')))
-        return True
+#     def _check_exists(self) -> bool:
+#         if 'cifar' in self.shift_type:
+#             return (os.path.exists(os.path.join(self.root, 'cifar-10-batches-py')) and
+#                     os.path.exists(os.path.join(self.root, 'cifar-100-python')))
+#         elif 'mnist' in self.shift_type:
+#             return (os.path.exists(os.path.join(self.root, 'MNIST')) and
+#                     os.path.exists(os.path.join(self.root, 'FashionMNIST')))
+#         return True
     
-    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        transform = transforms.Compose([transforms.ToTensor()])
+#     def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+#         transform = transforms.Compose([transforms.ToTensor()])
         
-        if self.shift_type == 'cifar10_cifar100':
-            dataset1 = torchvision.datasets.CIFAR10(root=self.root, train=True, transform=transform)
-            dataset2 = torchvision.datasets.CIFAR100(root=self.root, train=True, transform=transform)
+#         if self.shift_type == 'cifar10_cifar100':
+#             dataset1 = torchvision.datasets.CIFAR10(root=self.root, train=True, transform=transform)
+#             dataset2 = torchvision.datasets.CIFAR100(root=self.root, train=True, transform=transform)
         
-        elif self.shift_type == 'mnist_fashionmnist':
-            dataset1 = torchvision.datasets.MNIST(root=self.root, train=True, transform=transform)
-            dataset2 = torchvision.datasets.FashionMNIST(root=self.root, train=True, transform=transform)
+#         elif self.shift_type == 'mnist_fashionmnist':
+#             dataset1 = torchvision.datasets.MNIST(root=self.root, train=True, transform=transform)
+#             dataset2 = torchvision.datasets.FashionMNIST(root=self.root, train=True, transform=transform)
         
-        else:
-            raise ValueError(f"Unknown shift type: {self.shift_type}")
+#         else:
+#             raise ValueError(f"Unknown shift type: {self.shift_type}")
         
-        # Sample from both datasets
-        np.random.seed(self.seed)
+#         # Sample from both datasets
+#         np.random.seed(self.seed)
         
-        indices1 = np.random.choice(len(dataset1), self.N, replace=False)
-        indices2 = np.random.choice(len(dataset2), self.M, replace=False)
+#         indices1 = np.random.choice(len(dataset1), self.N, replace=False)
+#         indices2 = np.random.choice(len(dataset2), self.M, replace=False)
         
-        X = torch.stack([dataset1[i][0] for i in indices1])
-        Y = torch.stack([dataset2[i][0] for i in indices2])
+#         X = torch.stack([dataset1[i][0] for i in indices1])
+#         Y = torch.stack([dataset2[i][0] for i in indices2])
         
-        return X, Y
-
-
-# Aliases for common use cases
-CIFAR10AdversarialAttack = CIFAR10Adversarial  # More descriptive name
+#         return X, Y

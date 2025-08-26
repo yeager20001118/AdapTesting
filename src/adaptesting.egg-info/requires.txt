@@ -3,3 +3,6 @@ typing
 jax
 pytorch_tabnet
 transformers
+einops
+datasets<4.0.0
+torchattacks
