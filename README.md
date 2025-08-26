@@ -82,7 +82,7 @@ plt.show()
 from adaptesting import datasets
 
 # Text Human-written text VS. Machine-generated text datasets
-hc3 = datasets.HC3(N=100, M=100, attack_method='PGD')
+hc3 = datasets.HC3(N=100, M=100)
 X, Y = hc3()
 # Visualize hwt and mgt
 print(X[0])
@@ -165,5 +165,6 @@ This work is done by
 - Xunye Tian (UOM), [xunyetian.ml@gmail.com](xunyetian.ml@gmail.com)
 - Zhijian Zhou (UOM), [zhijianzhou.ml@gmail.com](zhijianzhou.ml@gmail.com)
 - [Dr. Feng Liu](https://fengliu90.github.io/) (UOM), [fengliu.ml@gmail.com](fengliu.ml@gmail.com)
+
 
 
