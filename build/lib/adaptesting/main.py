@@ -112,7 +112,7 @@ def tst(
     else:
         h = 0
         print(f"Fail to reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
-              f"the test statistics is for {method} is {mmd_value:.{output_round}f}.")
+              f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
 
     return h, mmd_value, p_value
 
