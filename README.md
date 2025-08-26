@@ -71,7 +71,7 @@ from adaptesting import datasets
 # Tabular Cifar10 VS Cifar10.adv datasets
 cifar_adv = datasets.CIFAR10Adversarial(N=100, M=100, attack_method='PGD')
 X, Y = cifar_adv()
-# Visualize HDGM's first 2 dimension
+# Visualize Cifar10's original image, and its adversarial attacked image
 plt.imshow(X[0].permute(1, 2, 0))
 plt.imshow(Y[0].permute(1, 2, 0))
 plt.show()
@@ -139,4 +139,5 @@ This work is done by
 - Xunye Tian (UOM), [xunyetian.ml@gmail.com](xunyetian.ml@gmail.com)
 - Zhijian Zhou (UOM), [zhijianzhou.ml@gmail.com](zhijianzhou.ml@gmail.com)
 - [Dr. Feng Liu](https://fengliu90.github.io/) (UOM), [fengliu.ml@gmail.com](fengliu.ml@gmail.com)
+
 
