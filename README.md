@@ -23,7 +23,7 @@ To address these challenges, we present ***AdapTesting***, a comprehensive toolb
 
 Our initial release focuses on implementing comprehensive two-sample testing methods, with planned extensions to include independence testing and other frequently used hypothesis tests in subsequent releases. Through AdapTesting, we aim to democratize statistical testing in machine learning by providing a unified, efficient, and accessible framework that bridges the gap between theoretical methods and practical applications.
 
-## Methods for TST - referenced paper
+## Methods for Two-sample Testing - referenced paper
 
 - Median Heuristics - [Large Sample Analysis of the Median Heuristic](https://arxiv.org/pdf/1707.07269)
 - MMD-FUSE - [MMD-FUSE: Learning and Combining Kernels for Two-Sample Testing Without Data Splitting](https://arxiv.org/pdf/2306.08777)
@@ -50,7 +50,7 @@ pip install uv
 uv pip install autogluon.tabular[mitra] 
 ```
 
-#### Datasets for TST
+#### Datasets for Two-sample Testing
 You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets. 
 ```Python
 from adaptesting import datasets
@@ -68,15 +68,38 @@ plt.show()
 ```Python
 from adaptesting import datasets
 
-# Tabular Cifar10 VS Cifar10.adv datasets
+# Image Cifar10 VS. Cifar10.adv datasets
 cifar_adv = datasets.CIFAR10Adversarial(N=100, M=100, attack_method='PGD')
 X, Y = cifar_adv()
 # Visualize Cifar10's original image, and its adversarial attacked image
-plt.imshow(X[0].permute(1, 2, 0))
-plt.imshow(Y[0].permute(1, 2, 0))
+imshow(X[:25].permute(1, 2, 0))
+imshow(Y[:25].permute(1, 2, 0))
 plt.show()
 ```
 ![Plot Output](./examples/cifar_adv_plot.png)
+
+```Python
+from adaptesting import datasets
+
+# Text Human-written text VS. Machine-generated text datasets
+hc3 = datasets.HC3(N=100, M=100, attack_method='PGD')
+X, Y = hc3()
+# Visualize hwt and mgt
+print(X[0])
+print(Y[0])
+```
+
+```txt
+# HWT
+Basically there are many categories of " Best Seller " . Replace " Best Seller " by something like " Oscars " and every " best seller " book is basically an " oscar - winning " book . May not have won the " Best film " , but even if you won the best director or best script , you 're still an " oscar - winning " film . Same thing for best sellers . Also , IIRC the rankings change every week or something like that . Some you might not be best seller one week , but you may be the next week . I guess even if you do n't stay there for long , you still achieved the status . Hence , # 1 best seller .
+```
+
+```txt
+# MGT
+There are many different best seller lists that are published by various organizations, and the New York Times is just one of them. The New York Times best seller list is a weekly list that ranks the best-selling books in the United States based on sales data from a number of different retailers. The list is published in the New York Times newspaper and is widely considered to be one of the most influential best seller lists in the book industry. 
+It's important to note that the New York Times best seller list is not the only best seller list out there, and there are many other lists that rank the top-selling books in different categories or in different countries. So it's possible that a book could be a best seller on one list but not on another. 
+Additionally, the term "best seller" is often used more broadly to refer to any book that is selling well, regardless of whether it is on a specific best seller list or not. So it's possible that you may hear about a book being a "best seller" even if it is not specifically ranked as a number one best seller on the New York Times list or any other list.
+```
 
 
 #### Example usage of Two-sample Testing
@@ -118,7 +141,7 @@ Otherwise,
 """
 ```
 
-### Performance of TST methods
+### Performance of Two-sample Testing methods
 
 Performance evaluations and benchmarks across tabular, image, and text data can be found in the [examples](./examples) directory.
 
@@ -133,6 +156,9 @@ Performance evaluations and benchmarks across tabular, image, and text data can 
 3. **MMD-Agg**: Aggregated MMD test across different kernels
 4. **MMD-Deep**: Deep kernel MMD with neural network learned features
 5. **C2ST-MMD**: Classifier two-sample test with MMD statistic -->
+
+## Future Features
+We are still working on providing the toolbox functionality for other hypothesis testings, e.g., **independence testing**, **conditional independence testing**, **relative testing** and **distribution closeness testing**.
 
 ## Contributors
 This work is done by
