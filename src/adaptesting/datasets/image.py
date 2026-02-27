@@ -193,6 +193,113 @@ class CIFAR10Adversarial(ImageTSTDataset):
         return X, Y
 
 
+class CIFAR10_1(ImageTSTDataset):
+    """
+    CIFAR-10 original test set vs CIFAR-10.1 v4 dataset.
+
+    CIFAR-10.1 is a new test set for CIFAR-10 collected by Recht et al. (2018)
+    to measure classifier accuracy under distribution shift.
+
+    Reference: https://github.com/modestyachts/CIFAR-10.1
+    """
+
+    # Default data directory bundled with the package
+    _PACKAGE_DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+
+    def __init__(
+        self,
+        root: str = None,
+        N: int = 1000,
+        M: int = 1000,
+        download: bool = True,
+        cifar101_file: str = 'cifar10.1_v4_data.npy',
+        **kwargs
+    ):
+        """
+        Args:
+            root (str): Root directory for dataset storage. If None, uses the package's bundled data directory.
+            N (int): Number of samples from CIFAR-10 original test set
+            M (int): Number of samples from CIFAR-10.1 v4 dataset
+            download (bool): If True, download CIFAR-10 if not found
+            cifar101_file (str): Filename of the CIFAR-10.1 v4 data file
+        """
+        if root is None:
+            root = self._PACKAGE_DATA_DIR
+        self.cifar101_file = cifar101_file
+        super().__init__(root, N, M, download, **kwargs)
+
+    def _download(self):
+        # Download CIFAR-10 dataset (test set)
+        torchvision.datasets.CIFAR10(
+            root=self.root,
+            train=False,
+            download=True
+        )
+
+    def _check_exists(self) -> bool:
+        cifar_path = os.path.join(self.root, 'cifar-10-batches-py')
+        cifar101_path = os.path.join(self.root, self.cifar101_file)
+        return os.path.exists(cifar_path) and os.path.exists(cifar101_path)
+
+    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Load CIFAR-10 original test set
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+
+        cifar10_test = torchvision.datasets.CIFAR10(
+            root=self.root,
+            train=False,
+            transform=transform
+        )
+
+        # Load CIFAR-10.1 v4 data
+        cifar101_path = os.path.join(self.root, self.cifar101_file)
+        cifar101_data = np.load(cifar101_path)
+
+        # Convert CIFAR-10.1 data to torch tensor
+        # Shape: (N, 32, 32, 3) -> (N, 3, 32, 32), normalized to [0, 1]
+        cifar101_tensor = torch.from_numpy(cifar101_data).float()
+        cifar101_tensor = (cifar101_tensor.permute(0, 3, 1, 2) / 255.0).contiguous()
+
+        # Sample from CIFAR-10 original test set
+        np.random.seed(self.seed)
+        cifar10_indices = np.random.choice(
+            len(cifar10_test),
+            min(self.N, len(cifar10_test)),
+            replace=False
+        )
+
+        original_images = []
+        for i in cifar10_indices:
+            img, _ = cifar10_test[i]
+            original_images.append(img)
+
+        X = torch.stack(original_images[:self.N])
+
+        # Sample from CIFAR-10.1 v4 dataset
+        cifar101_indices = np.random.choice(
+            len(cifar101_tensor),
+            min(self.M, len(cifar101_tensor)),
+            replace=False
+        )
+        Y = cifar101_tensor[cifar101_indices[:self.M]]
+
+        # Type-I error check: draw both samples from the same distribution
+        if self.t1_check:
+            print("Type-I error check: Drawing both X and Y from CIFAR-10.1 distribution")
+            total_needed = self.N + self.M
+            if len(cifar101_tensor) < total_needed:
+                indices = np.random.choice(len(cifar101_tensor), total_needed, replace=True)
+            else:
+                indices = np.random.choice(len(cifar101_tensor), total_needed, replace=False)
+
+            X = cifar101_tensor[indices[:self.N]]
+            Y = cifar101_tensor[indices[self.N:self.N+self.M]]
+
+        return X, Y
+
+
 # class MNISTCorrupted(ImageTSTDataset):
 #     """
 #     MNIST original vs corrupted images using MNIST-C dataset.
@@ -322,175 +429,3 @@ class CIFAR10Adversarial(ImageTSTDataset):
 #         return X, Y
 
 
-# class ImageNetAdversarial(ImageTSTDataset):
-#     """
-#     ImageNet subset original vs adversarial examples.
-    
-#     Uses a subset of ImageNet (or ImageNet-like dataset) and generates
-#     adversarial examples using torchattacks with pretrained models.
-#     """
-    
-#     def __init__(
-#         self,
-#         root: str = './data',
-#         N: int = 500,
-#         M: int = 500,
-#         download: bool = True,
-#         attack_method: str = 'PGD',
-#         epsilon: float = 16/255,
-#         image_size: int = 224,
-#         subset_classes: int = 10,
-#         **kwargs
-#     ):
-#         """
-#         Args:
-#             attack_method (str): Attack method ('FGSM', 'PGD', 'C&W', 'AutoAttack')
-#             epsilon (float): Perturbation strength
-#             image_size (int): Size to resize images to
-#             subset_classes (int): Number of ImageNet classes to use
-#         """
-#         if not TORCHATTACKS_AVAILABLE:
-#             print("Warning: torchattacks not available. Using simple noise perturbation.")
-        
-#         self.attack_method = attack_method
-#         self.epsilon = epsilon
-#         self.image_size = image_size
-#         self.subset_classes = subset_classes
-#         super().__init__(root, N, M, download, **kwargs)
-    
-#     def _download(self):
-#         # Use CIFAR-10 as a proxy for ImageNet (easier to download)
-#         # In practice, you might use actual ImageNet subset
-#         torchvision.datasets.CIFAR10(
-#             root=self.root, 
-#             train=True, 
-#             download=True
-#         )
-#         print("Using CIFAR-10 as ImageNet proxy for demonstration")
-    
-#     def _check_exists(self) -> bool:
-#         cifar_path = os.path.join(self.root, 'cifar-10-batches-py')
-#         return os.path.exists(cifar_path)
-    
-#     def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-#         # Load dataset (using CIFAR-10 as proxy)
-#         transform = transforms.Compose([
-#             transforms.Resize((self.image_size, self.image_size)),
-#             transforms.ToTensor(),
-#         ])
-        
-#         dataset = torchvision.datasets.CIFAR10(
-#             root=self.root, 
-#             train=True, 
-#             transform=transform
-#         )
-        
-#         # Use pretrained ResNet
-#         model = torchvision.models.resnet18(weights='IMAGENET1K_V1')
-#         model.eval()
-        
-#         # Sample data
-#         np.random.seed(self.seed)
-#         indices = np.random.choice(len(dataset), min(self.N + self.M, len(dataset)), replace=False)
-        
-#         original_images = []
-#         labels = []
-        
-#         for i in indices[:self.N]:
-#             img, label = dataset[i]
-#             original_images.append(img)
-#             labels.append(label)
-        
-#         # Generate adversarial examples
-#         if TORCHATTACKS_AVAILABLE and len(original_images) > 0:
-#             batch_images = torch.stack(original_images)
-#             batch_labels = torch.tensor(labels)
-            
-#             if self.attack_method == 'PGD':
-#                 attack = torchattacks.PGD(model, eps=self.epsilon, alpha=2/255, steps=10)
-#             elif self.attack_method == 'FGSM':
-#                 attack = torchattacks.FGSM(model, eps=self.epsilon)
-#             else:
-#                 attack = torchattacks.FGSM(model, eps=self.epsilon)
-            
-#             adversarial_images = attack(batch_images, batch_labels)
-#         else:
-#             # Fallback: add noise
-#             adversarial_images = []
-#             for img in original_images[:self.M]:
-#                 noise = torch.randn_like(img) * self.epsilon
-#                 adv_img = torch.clamp(img + noise, 0, 1)
-#                 adversarial_images.append(adv_img)
-#             adversarial_images = torch.stack(adversarial_images)
-        
-#         X = torch.stack(original_images[:self.N])
-#         Y = adversarial_images[:self.M]
-        
-#         return X, Y
-
-
-# class NaturalImageShifts(ImageTSTDataset):
-#     """
-#     Natural distribution shifts using real datasets.
-    
-#     Uses different datasets or different domains within a dataset
-#     to represent natural distribution shifts.
-#     """
-    
-#     def __init__(
-#         self,
-#         root: str = './data',
-#         N: int = 500,
-#         M: int = 500,
-#         download: bool = True,
-#         shift_type: str = 'cifar10_cifar100',
-#         **kwargs
-#     ):
-#         """
-#         Args:
-#             shift_type (str): Type of shift ('cifar10_cifar100', 'mnist_fashionmnist', etc.)
-#         """
-#         self.shift_type = shift_type
-#         super().__init__(root, N, M, download, **kwargs)
-    
-#     def _download(self):
-#         if 'cifar' in self.shift_type:
-#             torchvision.datasets.CIFAR10(root=self.root, train=True, download=True)
-#             torchvision.datasets.CIFAR100(root=self.root, train=True, download=True)
-#         elif 'mnist' in self.shift_type:
-#             torchvision.datasets.MNIST(root=self.root, train=True, download=True)
-#             torchvision.datasets.FashionMNIST(root=self.root, train=True, download=True)
-    
-#     def _check_exists(self) -> bool:
-#         if 'cifar' in self.shift_type:
-#             return (os.path.exists(os.path.join(self.root, 'cifar-10-batches-py')) and
-#                     os.path.exists(os.path.join(self.root, 'cifar-100-python')))
-#         elif 'mnist' in self.shift_type:
-#             return (os.path.exists(os.path.join(self.root, 'MNIST')) and
-#                     os.path.exists(os.path.join(self.root, 'FashionMNIST')))
-#         return True
-    
-#     def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-#         transform = transforms.Compose([transforms.ToTensor()])
-        
-#         if self.shift_type == 'cifar10_cifar100':
-#             dataset1 = torchvision.datasets.CIFAR10(root=self.root, train=True, transform=transform)
-#             dataset2 = torchvision.datasets.CIFAR100(root=self.root, train=True, transform=transform)
-        
-#         elif self.shift_type == 'mnist_fashionmnist':
-#             dataset1 = torchvision.datasets.MNIST(root=self.root, train=True, transform=transform)
-#             dataset2 = torchvision.datasets.FashionMNIST(root=self.root, train=True, transform=transform)
-        
-#         else:
-#             raise ValueError(f"Unknown shift type: {self.shift_type}")
-        
-#         # Sample from both datasets
-#         np.random.seed(self.seed)
-        
-#         indices1 = np.random.choice(len(dataset1), self.N, replace=False)
-#         indices2 = np.random.choice(len(dataset2), self.M, replace=False)
-        
-#         X = torch.stack([dataset1[i][0] for i in indices1])
-#         Y = torch.stack([dataset2[i][0] for i in indices2])
-        
-#         return X, Y

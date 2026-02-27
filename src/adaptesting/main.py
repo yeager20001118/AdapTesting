@@ -232,6 +232,7 @@ def agg(X, Y, alpha, n_perm, kernel, n_bandwidth, seed, is_jax, is_permuted):
     # print(scaled_p_vals)
 
     min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
+    min_p_value = torch.clamp(min_p_value, max=1.0)
     mmd_value = mmd_values[min_idx]
     return min_p_value, mmd_value
 

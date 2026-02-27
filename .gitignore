@@ -1,3 +1,4 @@
 # Data folder
 examples/data/
 data.zip
+src/adaptesting/datasets/data/cifar-10*

@@ -24,6 +24,7 @@ __all__ = [
     # 'Wine',
     # Image datasets with real attacks
     'CIFAR10Adversarial',
+    'CIFAR10_1',
     # 'MNISTCorrupted',
     # 'ImageNetAdversarial',
     # 'NaturalImageShifts',
