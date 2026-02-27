@@ -3,8 +3,7 @@
  <h1> <br>AdapTesting: A Data-adaptive Hypothesis Testing Toolbox <br> <br></h1>
 </div>
 
-
-<div align="center"> 
+<div align="center">
 
 [![arXiv](https://img.shields.io/badge/arXiv-1234.56789-red.svg)](https://arxiv.org/abs/1234.56789)
 [![Papers with Code](https://img.shields.io/badge/Papers%20with%20Code-Statistical%20Testing-brightgreen.svg)](https://paperswithcode.com/task/hypothesis-testing)
@@ -36,22 +35,28 @@ Our initial release focuses on implementing comprehensive two-sample testing met
 #### Installation
 
 You can install using `pip` and access it locally:
+
 ```bash
 pip install git+https://github.com/yeager20001118/AdapTesting
 ```
+
 or install it from [PyPI](https://pypi.org/) after we release and publish it:
+
 ```bash
 pip install adaptesting
 ```
 
 As we are using the Mitra (tabular foundation model) by default, you have to install it by:
+
 ```bash
 pip install uv
 uv pip install autogluon.tabular[mitra] 
 ```
 
 #### Datasets for Two-sample Testing
-You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets. 
+
+You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets.
+
 ```Python
 from adaptesting import datasets
 
@@ -63,6 +68,7 @@ plt.plot(X[:, 0], X[:, 1], 'o')
 plt.plot(Y[:, 0], Y[:, 1], 'o')
 plt.show()
 ```
+
 ![Plot Output](./examples/hdgm_plot.png)
 
 ```Python
@@ -76,7 +82,22 @@ imshow(X[:25].permute(1, 2, 0))
 imshow(Y[:25].permute(1, 2, 0))
 plt.show()
 ```
+
 ![Plot Output](./examples/cifar_adv_plot.png)
+
+```Python
+from adaptesting import datasets
+
+# Image Cifar10 VS. Cifar10.1 datasets
+cifar_1 = datasets.CIFAR10_1(N=500, M=500)
+X, Y = cifar_1()
+# Visualize Cifar10's original image, and its independent unseen Cifar10.1 image
+imshow(X[:25].permute(1, 2, 0))
+imshow(Y[:25].permute(1, 2, 0))
+plt.show()
+```
+
+![Plot Output](./examples/cifar10_1_plot.png)
 
 ```Python
 from adaptesting import datasets
@@ -100,7 +121,6 @@ There are many different best seller lists that are published by various organiz
 It's important to note that the New York Times best seller list is not the only best seller list out there, and there are many other lists that rank the top-selling books in different categories or in different countries. So it's possible that a book could be a best seller on one list but not on another. 
 Additionally, the term "best seller" is often used more broadly to refer to any book that is selling well, regardless of whether it is on a specific best seller list or not. So it's possible that you may hear about a book being a "best seller" even if it is not specifically ranked as a number one best seller on the New York Times list or any other list.
 ```
-
 
 #### Example usage of Two-sample Testing
 
@@ -158,13 +178,13 @@ Performance evaluations and benchmarks across tabular, image, and text data can 
 5. **C2ST-MMD**: Classifier two-sample test with MMD statistic -->
 
 ## Future Features
+
 We are still working on providing the toolbox functionality for other hypothesis testings, e.g., **independence testing**, **conditional independence testing**, **relative testing** and **distribution closeness testing**.
 
 ## Contributors
+
 This work is done by
+
 - Xunye Tian (UOM), [xunyetian.ml@gmail.com](xunyetian.ml@gmail.com)
 - Zhijian Zhou (UOM), [zhijianzhou.ml@gmail.com](zhijianzhou.ml@gmail.com)
 - [Dr. Feng Liu](https://fengliu90.github.io/) (UOM), [fengliu.ml@gmail.com](fengliu.ml@gmail.com)
-
-
-
