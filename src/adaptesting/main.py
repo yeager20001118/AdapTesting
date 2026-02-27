@@ -1,3 +1,4 @@
+import gc
 import torch
 from .utils import *
 
@@ -113,6 +114,14 @@ def tst(
         h = 0
         print(f"Fail to reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
               f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
+
+    # Clean up GPU memory
+    if torch.cuda.is_available() and str(device) != "cpu":
+        del X, Y
+        if model is not None and default_model:
+            del model
+        gc.collect()
+        torch.cuda.empty_cache()
 
     return h, mmd_value, p_value
 
