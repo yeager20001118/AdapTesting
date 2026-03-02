@@ -22,7 +22,9 @@ def tst(
         is_permuted=False,
         is_log = False,
         is_history = False,
-        is_label = False):
+        is_label = False,
+        is_report = True,
+        is_balanced = True):
     
     if data_type == "text":
         if isinstance(X, list) or isinstance(Y, list):
@@ -31,6 +33,7 @@ def tst(
             Y = sentences_to_embeddings(Y, device)
             data_type = "tabular"
         else:
+            print("Assuming the input text data are already in the form of embeddings.")
             data_type = "tabular"
     
     # Check the X, Y are torch tensors
@@ -54,8 +57,8 @@ def tst(
     X = X.to(device=device, dtype=dtype)
     Y = Y.to(device=device, dtype=dtype)
 
-    X, Y = check_shapes_and_adjust(X, Y)
-    n_sample = len(X)  # represent the size of one sample
+    X, Y = check_shapes_and_adjust(X, Y, is_balanced, is_report)
+    # n_sample = len(X)  # represent the size of one sample
     if model is None and method in ['deep', 'clf']:
         default_model = True
         if data_type == 'tabular':
@@ -108,12 +111,14 @@ def tst(
 
     if p_value <= alpha:
         h = 1
-        print(f"Reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
-              f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
+        if is_report:
+            print(f"Reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
+                f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
     else:
         h = 0
-        print(f"Fail to reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
-              f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
+        if is_report:
+            print(f"Fail to reject the null hypothesis with p-value: {p_value:.{output_round}f}, "
+                f"the test statistics for {method} is {mmd_value:.{output_round}f}.")
 
     # Clean up GPU memory
     if torch.cuda.is_available() and str(device) != "cpu":

@@ -109,13 +109,17 @@ class MitraTabularModel(nn.Module):
             return torch.tensor(pred_proba.values, dtype=torch.float32, device=self.device)
 
 
-def check_shapes_and_adjust(X, Y):
+def check_shapes_and_adjust(X, Y, is_balanced, is_report):
     # Check if X and Y have the same length
-    if len(X) != len(Y):
-        # If not, use the minimum length
-        min_length = min(len(X), len(Y))
-        X = X[:min_length]
-        Y = Y[:min_length]
+    if is_balanced:
+        if len(X) != len(Y):
+            # If not, use the minimum length
+            min_length = min(len(X), len(Y))
+
+            if is_report:
+                print(f"The number of samples in X and Y is not the same, so we use the minimum length {min_length}.")
+            X = X[:min_length]
+            Y = Y[:min_length]
 
     # Check if the non-batch dimensions of each tensor in X and Y are the same
     if X.size()[1:] != Y.size()[1:]:
