@@ -16,6 +16,11 @@ setup(
     # url="",
     install_requires=[
         "torch",
+        "torchvision",
+        "numpy",
+        "matplotlib",
+        "pandas",
+        "autogluon.tabular",
         "typing",
         "jax",
         "pytorch_tabnet",

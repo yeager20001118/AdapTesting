@@ -3,7 +3,9 @@ README.md
 setup.py
 src/adaptesting/__init__.py
 src/adaptesting/constants.py
+src/adaptesting/idt_method.py
 src/adaptesting/main.py
+src/adaptesting/tst_method.py
 src/adaptesting/utils.py
 src/adaptesting.egg-info/PKG-INFO
 src/adaptesting.egg-info/SOURCES.txt
@@ -15,4 +17,5 @@ src/adaptesting/datasets/base.py
 src/adaptesting/datasets/image.py
 src/adaptesting/datasets/tabular.py
 src/adaptesting/datasets/text.py
+tests/test_hsicagg.py
 tests/test_main.py

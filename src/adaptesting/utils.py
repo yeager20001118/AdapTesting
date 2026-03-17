@@ -291,7 +291,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
         if perm_mmd >= observed_mmd:
             count += 1
 
-    p_value = count / num_permutations
+    p_value = (count + 1) / (num_permutations + 1)
     return p_value, observed_mmd
 
 
@@ -900,3 +900,122 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
         model.load_state_dict(best_model_state)
 
     return model, history, [c_epsilon, b_q, b_phi]
+
+
+#########################################################################################################
+
+################################### Helper functions for HSICAggInc test ################################
+
+
+def compute_hsic_bandwidths(X, Y, N, hsic_collection_parameters):
+    """Compute the collection of Gaussian bandwidths for X and Y using the median heuristic."""
+    power, l_minus, l_plus = hsic_collection_parameters
+    device, dtype = X.device, X.dtype
+    max_s = min(500, N)
+    triu = torch.triu_indices(max_s, max_s, offset=1, device=device)
+
+    def _median_bw(Z):
+        dists = torch.cdist(Z[:max_s], Z[:max_s])[triu[0], triu[1]]
+        pos = dists[dists > 0]
+        return torch.median(pos).item() if pos.numel() > 0 else 1.0
+
+    median_bw_X = _median_bw(X)
+    median_bw_Y = _median_bw(Y)
+    levels = range(l_minus, l_plus + 1)
+    bandwidths_X = torch.tensor([power ** i * median_bw_X for i in levels], device=device, dtype=dtype)
+    bandwidths_Y = torch.tensor([power ** i * median_bw_Y for i in levels], device=device, dtype=dtype)
+    return bandwidths_X, bandwidths_Y
+
+
+def create_superdiagonal_indices(N, R, device):
+    """Return index pairs (index_i, index_j) for R superdiagonals of an N x N matrix."""
+    idx_i, idx_j = [], []
+    for r in range(1, R + 1):
+        base = torch.arange(N - r, device=device)
+        idx_i.append(base)
+        idx_j.append(base + r)
+    return torch.cat(idx_i), torch.cat(idx_j)
+
+
+def compute_h_mmd_inc(X_a, X_b, index_i, index_j, bandwidths):
+    """
+    Compute incomplete U-statistic h-values for a Gaussian MMD.
+    inputs : X_a, X_b (N, d); index_i, index_j (L,); bandwidths (n_bw,)
+    output : (n_bw, L)
+    """
+    norms = torch.stack([
+        ((X_a[index_i] - X_a[index_j]) ** 2).sum(dim=1),
+        ((X_a[index_i] - X_b[index_j]) ** 2).sum(dim=1),
+        ((X_b[index_i] - X_a[index_j]) ** 2).sum(dim=1),
+        ((X_b[index_i] - X_b[index_j]) ** 2).sum(dim=1),
+    ])  # (4, L)
+    exps = torch.exp(-norms.unsqueeze(0) / (bandwidths ** 2).view(-1, 1, 1))  # (n_bw, 4, L)
+    return exps[:, 0] - exps[:, 1] - exps[:, 2] + exps[:, 3]
+
+
+def compute_h_hsic(X, Y, N, index_i, index_j, bandwidths_X, bandwidths_Y):
+    """
+    Compute HSIC h-values as the outer product of per-variable MMD h-values.
+    output : (n_bw_X * n_bw_Y, L)
+    """
+    h_X = compute_h_mmd_inc(X[:N], X[N:], index_i, index_j, bandwidths_X)  # (n_bw_X, L)
+    h_Y = compute_h_mmd_inc(Y[:N], Y[N:], index_i, index_j, bandwidths_Y)  # (n_bw_Y, L)
+    L = h_X.shape[1]
+    return (h_X.unsqueeze(0) * h_Y.unsqueeze(1)).reshape(-1, L)             # (n_bw_X*n_bw_Y, L)
+
+
+def hsic_wild_bootstrap(h_XY, index_i, index_j, N, B1, B2, seed):
+    """
+    Compute bootstrap and original HSIC statistics using Rademacher wild bootstrap.
+    output : bootstrap_values (n_bw, B1+B2), original_value (n_bw,)
+    """
+    device, dtype = h_XY.device, h_XY.dtype
+    L = index_i.shape[0]
+    torch.manual_seed(seed)
+    epsilon = torch.randint(0, 2, (N, B1 + B2), device=device, dtype=dtype) * 2 - 1
+    e_vals = epsilon[index_i] * epsilon[index_j]          # (L, B1+B2)
+    bootstrap_values = (h_XY @ e_vals) / L                # (n_bw, B1+B2)
+    original_value = h_XY.sum(dim=1) / L                  # (n_bw,)
+    return bootstrap_values, original_value
+
+
+def compute_u_hsic(bootstrap_values, original_value, weights, B1, B3, alpha):
+    """
+    Bisection to find the level-corrected u for HSICAggInc (uniform weights).
+    output : u (float), quantiles (n_bw, 1)
+    """
+    device, dtype = bootstrap_values.device, bootstrap_values.dtype
+    n_bw = bootstrap_values.shape[0]
+    bootstrap_1_sorted, _ = torch.sort(
+        torch.cat([bootstrap_values[:, :B1], original_value.unsqueeze(1)], dim=1), dim=1
+    )
+    bootstrap_2 = bootstrap_values[:, B1:]
+    quantiles = torch.zeros(n_bw, 1, device=device, dtype=dtype)
+
+    u_min, u_max = 0.0, (1.0 / weights.min()).item()
+    for _ in range(B3):
+        u = (u_min + u_max) / 2
+        idx = (torch.ceil((B1 + 1) * (1 - u * weights)).long() - 1).clamp(0, B1)
+        for i in range(n_bw):
+            quantiles[i] = bootstrap_1_sorted[i, idx[i]]
+        P_u = ((bootstrap_2 - quantiles).max(dim=0)[0] > 0).float().mean().item()
+        u_min, u_max = (u, u_max) if P_u <= alpha else (u_min, u)
+
+    u = u_min
+    idx = (torch.ceil((B1 + 1) * (1 - u * weights)).long() - 1).clamp(0, B1)
+    for i in range(n_bw):
+        quantiles[i] = bootstrap_1_sorted[i, idx[i]]
+    return u, quantiles
+
+
+def compute_hsic_result(bootstrap_values, original_value, weights, u, B1, alpha):
+    """
+    Return the minimum level-corrected p-value and corresponding HSIC statistic.
+    output : (p_value, hsic_value)
+    """
+    bootstrap_1 = torch.cat([bootstrap_values[:, :B1], original_value.unsqueeze(1)], dim=1)
+    thresholds = u * weights
+    p_vals = (bootstrap_1 - original_value.unsqueeze(1) >= 0).float().mean(dim=1)
+    scaled_p_vals = p_vals * (alpha / thresholds.clamp(min=1e-10))
+    min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
+    return torch.clamp(min_p_value, max=1.0), original_value[min_idx]
