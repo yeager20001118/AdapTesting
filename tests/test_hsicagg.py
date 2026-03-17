@@ -104,9 +104,13 @@ tests = tests_hsic_vary_n
 from adaptesting import idt
 import torch
 
-N_values = [200, 400, 600, 800, 1000]
-# N_values=[1000]
-outputs_hsic_vary_n = np.zeros((len(tests), len(N_values), rep))
+method_names = ["hsicagg", "rdc", "fsic"]
+
+# N_values = [200, 400, 600, 800, 1000]
+N_values=[1000]
+outputs_hsic_vary_n = np.zeros((len(method_names), len(N_values), rep))
+stats_hsic_vary_n = np.zeros((len(method_names), len(N_values), rep))
+p_values_hsic_vary_n = np.zeros((len(method_names), len(N_values), rep))
 rs = np.random.RandomState(0)
 seed = 0
 
@@ -116,18 +120,38 @@ for i in range(rep):
         N = N_values[r]
         seed += 1
         perturbation_multiplier = np.exp(d) * p ** s / mult
-        Z = f_theta_sampler(f_theta_seed, seed, N, p, s, perturbation_multiplier, d)
-        X = np.expand_dims(Z[:, 0], 1)
-        Y = np.expand_dims(Z[:, 1], 1)
+        # Z = f_theta_sampler(f_theta_seed, seed, N, p, s, perturbation_multiplier, d)
+        # X = np.expand_dims(Z[:, 0], 1)
+        # Y = np.expand_dims(Z[:, 1], 1)
+
+        # Type-I error 
+        Zx = f_theta_sampler(f_theta_seed, seed, N, p, s, perturbation_multiplier, d)
+        Zy = f_theta_sampler(f_theta_seed, seed + 10_000, N, p, s, perturbation_multiplier, d)
+        X = np.expand_dims(Zx[:, 0], 1)
+        Y = np.expand_dims(Zy[:, 1], 1)
+
         X = torch.tensor(X, device="cpu")
         Y = torch.tensor(Y, device="cpu")
-        for j in range(len(tests)):
-            test = tests[j]
-            # outputs_hsic_vary_n[j][r][i] = test("hsic", X, Y, alpha=0.05, R=X.shape[0]-1, seed=seed)
-            h, stat_value, p_value = idt(X, Y, device="cpu", method='hsicagg', alpha=0.05, R=X.shape[0]-1, seed=seed, n_perm=500)
+        for j in range(len(method_names)):
+            method = method_names[j]
+            if method == "hsicagg":
+                h, stat_value, p_value = idt(
+                    X, Y, device="cpu", method=method, alpha=0.05,
+                    R=X.shape[0]-1, seed=seed, n_perm=500
+                )
+            else:
+                h, stat_value, p_value = idt(
+                    X, Y, device="cpu", method=method, alpha=0.05,
+                    seed=seed, n_perm=500
+                )
             outputs_hsic_vary_n[j][r][i] = h
+            stats_hsic_vary_n[j][r][i] = stat_value
+            p_values_hsic_vary_n[j][r][i] = p_value
     print(i + 1, "/", rep, "time:", time.time() - t0)
-power = np.array([[np.mean(outputs_hsic_vary_n[j][r])for r in range(len(N_values))] for j in range(len(tests))])
+power = np.array([[np.mean(outputs_hsic_vary_n[j][r])for r in range(len(N_values))] for j in range(len(method_names))])
 print(power)
-np.save("hsic_vary_n.npy", power)
-np.save("hsic_vary_n_x_axis.npy", N_values)
+for j, method in enumerate(method_names):
+    print(method, "mean_stat:", [np.mean(stats_hsic_vary_n[j][r]) for r in range(len(N_values))])
+    print(method, "mean_p_value:", [np.mean(p_values_hsic_vary_n[j][r]) for r in range(len(N_values))])
+# np.save("hsic_vary_n.npy", power)
+# np.save("hsic_vary_n_x_axis.npy", N_values)

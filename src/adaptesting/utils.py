@@ -1,12 +1,10 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
-import torchvision
 import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
 import jax.random as jrandom
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 from .constants import *
 from transformers import RobertaModel, RobertaTokenizer
 import pandas as pd
@@ -22,6 +20,7 @@ class DefaultImageModel(nn.Module):
     def __init__(self, n_channels=3, weights='DEFAULT', image_size=32):
         super().__init__()
         self.image_size = image_size
+        import torchvision
 
         # Load base ResNet with new weights parameter
         if weights == 'DEFAULT':
@@ -682,6 +681,8 @@ def plot_training_history(history, figsize=(12, 5)):
         history (dict): Dictionary containing 'train_loss', 'val_loss', and 'val_accuracy'
         figsize (tuple): Figure size (width, height)
     """
+    import matplotlib.pyplot as plt
+
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
 
@@ -1019,3 +1020,131 @@ def compute_hsic_result(bootstrap_values, original_value, weights, u, B1, alpha)
     scaled_p_vals = p_vals * (alpha / thresholds.clamp(min=1e-10))
     min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
     return torch.clamp(min_p_value, max=1.0), original_value[min_idx]
+
+
+#########################################################################################################
+
+################################### Helper functions for RDC and FSIC ###################################
+
+
+def adjust_independence_input(X):
+    if X.ndim == 1:
+        return X.unsqueeze(1)
+    return X
+
+
+def create_independence_generator(X, seed):
+    if X.is_cuda:
+        generator = torch.Generator(device=X.device)
+    else:
+        generator = torch.Generator()
+    generator.manual_seed(seed)
+    return generator
+
+
+def compute_rank_transform(X):
+    ranks = torch.argsort(torch.argsort(X, dim=0), dim=0).to(dtype=X.dtype)
+    return (ranks + 1) / (X.shape[0] + 1)
+
+
+def compute_positive_median_bandwidth(X, reg=1e-6):
+    X = adjust_independence_input(X)
+    pairwise = torch_distance(X, X, norm=2, is_squared=False)
+    triu = torch.triu_indices(pairwise.shape[0], pairwise.shape[1], offset=1, device=X.device)
+    values = pairwise[triu[0], triu[1]]
+    positive = values[values > 0]
+    if positive.numel() == 0:
+        return torch.tensor(1.0, device=X.device, dtype=X.dtype)
+    median = torch.median(positive)
+    return torch.clamp(median, min=torch.as_tensor(reg, device=X.device, dtype=X.dtype))
+
+
+def compute_inverse_sqrt_matrix(M, reg):
+    eye = torch.eye(M.shape[0], device=M.device, dtype=M.dtype)
+    evals, evecs = torch.linalg.eigh(M + reg * eye)
+    evals = torch.clamp(evals, min=reg)
+    return evecs @ torch.diag(evals.rsqrt()) @ evecs.transpose(-1, -2)
+
+
+def compute_rdc_statistic(X, Y, generator, num_features=20, scale=None, reg=1e-6):
+    X = adjust_independence_input(X)
+    Y = adjust_independence_input(Y)
+    n = X.shape[0]
+    if n < 2:
+        return torch.zeros((), device=X.device, dtype=X.dtype)
+
+    scale = 1.0 / 6.0 if scale is None else scale
+    scale = torch.as_tensor(scale, device=X.device, dtype=X.dtype)
+    reg = torch.as_tensor(reg, device=X.device, dtype=X.dtype)
+
+    X_copula = compute_rank_transform(X)
+    Y_copula = compute_rank_transform(Y)
+    ones = torch.ones((n, 1), device=X.device, dtype=X.dtype)
+    X_aug = torch.cat([X_copula, ones], dim=1)
+    Y_aug = torch.cat([Y_copula, ones], dim=1)
+
+    Wx = torch.randn((X_aug.shape[1], num_features), generator=generator, device=X.device, dtype=X.dtype)
+    Wy = torch.randn((Y_aug.shape[1], num_features), generator=generator, device=Y.device, dtype=Y.dtype)
+    bx = 2 * torch.pi * torch.rand((1, num_features), generator=generator, device=X.device, dtype=X.dtype)
+    by = 2 * torch.pi * torch.rand((1, num_features), generator=generator, device=Y.device, dtype=Y.dtype)
+
+    Fx = torch.sin(scale * (X_aug @ Wx) + bx)
+    Fy = torch.sin(scale * (Y_aug @ Wy) + by)
+    Fx = Fx - Fx.mean(dim=0, keepdim=True)
+    Fy = Fy - Fy.mean(dim=0, keepdim=True)
+
+    denom = max(n - 1, 1)
+    Sxx = (Fx.transpose(0, 1) @ Fx) / denom
+    Syy = (Fy.transpose(0, 1) @ Fy) / denom
+    Sxy = (Fx.transpose(0, 1) @ Fy) / denom
+
+    inv_sqrt_x = compute_inverse_sqrt_matrix(Sxx, reg)
+    inv_sqrt_y = compute_inverse_sqrt_matrix(Syy, reg)
+    corr = inv_sqrt_x @ Sxy @ inv_sqrt_y
+    singular_values = torch.linalg.svdvals(corr)
+    return torch.clamp(singular_values[0], min=0.0, max=1.0)
+
+
+def compute_permutation_p_value(stat_func, X, Y, n_perm, seed):
+    observed = stat_func(X, Y, seed)
+    count = torch.zeros((), device=X.device, dtype=X.dtype)
+    for perm_idx in range(n_perm):
+        generator = create_independence_generator(Y, seed + perm_idx + 1)
+        perm = torch.randperm(Y.shape[0], generator=generator, device=Y.device)
+        permuted = stat_func(X, Y[perm], seed)
+        count = count + (permuted >= observed).to(dtype=X.dtype)
+    p_value = (count + 1) / (n_perm + 1)
+    return p_value, observed
+
+
+def compute_fsic_features(X, locations, bandwidth):
+    pairwise = torch_distance(X, locations, norm=2, is_squared=True)
+    features = gaussian_kernel(pairwise, bandwidth, is_squared=True)
+    features = features.transpose(0, 1)
+    return features - features.mean(dim=0, keepdim=True)
+
+
+def compute_fsic_statistic(X, Y, x_indices, y_indices, reg=1e-6):
+    X = adjust_independence_input(X)
+    Y = adjust_independence_input(Y)
+    n = X.shape[0]
+    if n < 2:
+        return torch.zeros((), device=X.device, dtype=X.dtype)
+
+    locations_X = X[x_indices]
+    locations_Y = Y[y_indices]
+
+    bandwidth_X = compute_positive_median_bandwidth(X, reg=reg)
+    bandwidth_Y = compute_positive_median_bandwidth(Y, reg=reg)
+
+    features_X = compute_fsic_features(X, locations_X, bandwidth_X)
+    features_Y = compute_fsic_features(Y, locations_Y, bandwidth_Y)
+    U = (features_X.unsqueeze(2) * features_Y.unsqueeze(1)).reshape(n, x_indices.shape[0] * y_indices.shape[0])
+
+    mean_u = U.mean(dim=0)
+    centered = U - mean_u
+    covariance = (centered.transpose(0, 1) @ centered) / max(n - 1, 1)
+    reg = torch.as_tensor(reg, device=X.device, dtype=X.dtype)
+    eye = torch.eye(covariance.shape[0], device=X.device, dtype=X.dtype)
+    solved = torch.linalg.solve(covariance + reg * eye, mean_u.unsqueeze(1))
+    return n * (mean_u.unsqueeze(0) @ solved).squeeze()

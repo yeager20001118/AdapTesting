@@ -7,31 +7,26 @@ This module provides ready-to-use datasets for two-sample testing across differe
 - Text: Human vs AI generated, different domains
 """
 
-from .base import TSTDataset
-from .tabular import *
-from .image import *
-from .text import *
+from importlib import import_module
 
-__all__ = [
-    'TSTDataset',
-    # Challenging tabular datasets
-    'HiggsBoson',
-    # 'AdultIncome', 
-    # 'ChallengingSynthetic',
-    'HDGM',
-    # Easy tabular datasets (for comparison)
-    # 'BreastCancer',
-    # 'Wine',
-    # Image datasets with real attacks
-    'CIFAR10Adversarial',
-    'CIFAR10_1',
-    # 'MNISTCorrupted',
-    # 'ImageNetAdversarial',
-    # 'NaturalImageShifts',
-    # Text datasets using real sources
-    'HumanAIDetection',
-    'HC3',
-    # 'FakeNewsDetection',
-    # 'DomainShift',
-    # 'SentimentShift'
-]
+
+_EXPORT_TO_MODULE = {
+    'TSTDataset': '.base',
+    'HiggsBoson': '.tabular',
+    'HDGM': '.tabular',
+    'CIFAR10Adversarial': '.image',
+    'CIFAR10_1': '.image',
+    'HumanAIDetection': '.text',
+    'HC3': '.text',
+}
+
+__all__ = list(_EXPORT_TO_MODULE.keys())
+
+
+def __getattr__(name):
+    if name in _EXPORT_TO_MODULE:
+        module = import_module(_EXPORT_TO_MODULE[name], __name__)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

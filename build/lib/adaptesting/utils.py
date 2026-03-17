@@ -1,12 +1,10 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
-import torchvision
 import torch.optim.lr_scheduler as lr_scheduler
 import numpy as np
 import jax.random as jrandom
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 from .constants import *
 from transformers import RobertaModel, RobertaTokenizer
 import pandas as pd
@@ -22,6 +20,7 @@ class DefaultImageModel(nn.Module):
     def __init__(self, n_channels=3, weights='DEFAULT', image_size=32):
         super().__init__()
         self.image_size = image_size
+        import torchvision
 
         # Load base ResNet with new weights parameter
         if weights == 'DEFAULT':
@@ -109,13 +108,17 @@ class MitraTabularModel(nn.Module):
             return torch.tensor(pred_proba.values, dtype=torch.float32, device=self.device)
 
 
-def check_shapes_and_adjust(X, Y):
+def check_shapes_and_adjust(X, Y, is_balanced, is_report):
     # Check if X and Y have the same length
-    if len(X) != len(Y):
-        # If not, use the minimum length
-        min_length = min(len(X), len(Y))
-        X = X[:min_length]
-        Y = Y[:min_length]
+    if is_balanced:
+        if len(X) != len(Y):
+            # If not, use the minimum length
+            min_length = min(len(X), len(Y))
+
+            if is_report:
+                print(f"The number of samples in X and Y is not the same, so we use the minimum length {min_length}.")
+            X = X[:min_length]
+            Y = Y[:min_length]
 
     # Check if the non-batch dimensions of each tensor in X and Y are the same
     if X.size()[1:] != Y.size()[1:]:
@@ -287,7 +290,7 @@ def mmd_permutation_test(X, Y, num_permutations=100, kernel="gaussian", params=[
         if perm_mmd >= observed_mmd:
             count += 1
 
-    p_value = count / num_permutations
+    p_value = (count + 1) / (num_permutations + 1)
     return p_value, observed_mmd
 
 
@@ -678,6 +681,8 @@ def plot_training_history(history, figsize=(12, 5)):
         history (dict): Dictionary containing 'train_loss', 'val_loss', and 'val_accuracy'
         figsize (tuple): Figure size (width, height)
     """
+    import matplotlib.pyplot as plt
+
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
 
@@ -896,3 +901,250 @@ def train_deep(X, Y, val_ratio, batch_size, max_epoch, lr, patience, model, is_l
         model.load_state_dict(best_model_state)
 
     return model, history, [c_epsilon, b_q, b_phi]
+
+
+#########################################################################################################
+
+################################### Helper functions for HSICAggInc test ################################
+
+
+def compute_hsic_bandwidths(X, Y, N, hsic_collection_parameters):
+    """Compute the collection of Gaussian bandwidths for X and Y using the median heuristic."""
+    power, l_minus, l_plus = hsic_collection_parameters
+    device, dtype = X.device, X.dtype
+    max_s = min(500, N)
+    triu = torch.triu_indices(max_s, max_s, offset=1, device=device)
+
+    def _median_bw(Z):
+        dists = torch.cdist(Z[:max_s], Z[:max_s])[triu[0], triu[1]]
+        pos = dists[dists > 0]
+        return torch.median(pos).item() if pos.numel() > 0 else 1.0
+
+    median_bw_X = _median_bw(X)
+    median_bw_Y = _median_bw(Y)
+    levels = range(l_minus, l_plus + 1)
+    bandwidths_X = torch.tensor([power ** i * median_bw_X for i in levels], device=device, dtype=dtype)
+    bandwidths_Y = torch.tensor([power ** i * median_bw_Y for i in levels], device=device, dtype=dtype)
+    return bandwidths_X, bandwidths_Y
+
+
+def create_superdiagonal_indices(N, R, device):
+    """Return index pairs (index_i, index_j) for R superdiagonals of an N x N matrix."""
+    idx_i, idx_j = [], []
+    for r in range(1, R + 1):
+        base = torch.arange(N - r, device=device)
+        idx_i.append(base)
+        idx_j.append(base + r)
+    return torch.cat(idx_i), torch.cat(idx_j)
+
+
+def compute_h_mmd_inc(X_a, X_b, index_i, index_j, bandwidths):
+    """
+    Compute incomplete U-statistic h-values for a Gaussian MMD.
+    inputs : X_a, X_b (N, d); index_i, index_j (L,); bandwidths (n_bw,)
+    output : (n_bw, L)
+    """
+    norms = torch.stack([
+        ((X_a[index_i] - X_a[index_j]) ** 2).sum(dim=1),
+        ((X_a[index_i] - X_b[index_j]) ** 2).sum(dim=1),
+        ((X_b[index_i] - X_a[index_j]) ** 2).sum(dim=1),
+        ((X_b[index_i] - X_b[index_j]) ** 2).sum(dim=1),
+    ])  # (4, L)
+    exps = torch.exp(-norms.unsqueeze(0) / (bandwidths ** 2).view(-1, 1, 1))  # (n_bw, 4, L)
+    return exps[:, 0] - exps[:, 1] - exps[:, 2] + exps[:, 3]
+
+
+def compute_h_hsic(X, Y, N, index_i, index_j, bandwidths_X, bandwidths_Y):
+    """
+    Compute HSIC h-values as the outer product of per-variable MMD h-values.
+    output : (n_bw_X * n_bw_Y, L)
+    """
+    h_X = compute_h_mmd_inc(X[:N], X[N:], index_i, index_j, bandwidths_X)  # (n_bw_X, L)
+    h_Y = compute_h_mmd_inc(Y[:N], Y[N:], index_i, index_j, bandwidths_Y)  # (n_bw_Y, L)
+    L = h_X.shape[1]
+    return (h_X.unsqueeze(0) * h_Y.unsqueeze(1)).reshape(-1, L)             # (n_bw_X*n_bw_Y, L)
+
+
+def hsic_wild_bootstrap(h_XY, index_i, index_j, N, B1, B2, seed):
+    """
+    Compute bootstrap and original HSIC statistics using Rademacher wild bootstrap.
+    output : bootstrap_values (n_bw, B1+B2), original_value (n_bw,)
+    """
+    device, dtype = h_XY.device, h_XY.dtype
+    L = index_i.shape[0]
+    torch.manual_seed(seed)
+    epsilon = torch.randint(0, 2, (N, B1 + B2), device=device, dtype=dtype) * 2 - 1
+    e_vals = epsilon[index_i] * epsilon[index_j]          # (L, B1+B2)
+    bootstrap_values = (h_XY @ e_vals) / L                # (n_bw, B1+B2)
+    original_value = h_XY.sum(dim=1) / L                  # (n_bw,)
+    return bootstrap_values, original_value
+
+
+def compute_u_hsic(bootstrap_values, original_value, weights, B1, B3, alpha):
+    """
+    Bisection to find the level-corrected u for HSICAggInc (uniform weights).
+    output : u (float), quantiles (n_bw, 1)
+    """
+    device, dtype = bootstrap_values.device, bootstrap_values.dtype
+    n_bw = bootstrap_values.shape[0]
+    bootstrap_1_sorted, _ = torch.sort(
+        torch.cat([bootstrap_values[:, :B1], original_value.unsqueeze(1)], dim=1), dim=1
+    )
+    bootstrap_2 = bootstrap_values[:, B1:]
+    quantiles = torch.zeros(n_bw, 1, device=device, dtype=dtype)
+
+    u_min, u_max = 0.0, (1.0 / weights.min()).item()
+    for _ in range(B3):
+        u = (u_min + u_max) / 2
+        idx = (torch.ceil((B1 + 1) * (1 - u * weights)).long() - 1).clamp(0, B1)
+        for i in range(n_bw):
+            quantiles[i] = bootstrap_1_sorted[i, idx[i]]
+        P_u = ((bootstrap_2 - quantiles).max(dim=0)[0] > 0).float().mean().item()
+        u_min, u_max = (u, u_max) if P_u <= alpha else (u_min, u)
+
+    u = u_min
+    idx = (torch.ceil((B1 + 1) * (1 - u * weights)).long() - 1).clamp(0, B1)
+    for i in range(n_bw):
+        quantiles[i] = bootstrap_1_sorted[i, idx[i]]
+    return u, quantiles
+
+
+def compute_hsic_result(bootstrap_values, original_value, weights, u, B1, alpha):
+    """
+    Return the minimum level-corrected p-value and corresponding HSIC statistic.
+    output : (p_value, hsic_value)
+    """
+    bootstrap_1 = torch.cat([bootstrap_values[:, :B1], original_value.unsqueeze(1)], dim=1)
+    thresholds = u * weights
+    p_vals = (bootstrap_1 - original_value.unsqueeze(1) >= 0).float().mean(dim=1)
+    scaled_p_vals = p_vals * (alpha / thresholds.clamp(min=1e-10))
+    min_p_value, min_idx = torch.min(scaled_p_vals, dim=0)
+    return torch.clamp(min_p_value, max=1.0), original_value[min_idx]
+
+
+#########################################################################################################
+
+################################### Helper functions for RDC and FSIC ###################################
+
+
+def adjust_independence_input(X):
+    if X.ndim == 1:
+        return X.unsqueeze(1)
+    return X
+
+
+def create_independence_generator(X, seed):
+    if X.is_cuda:
+        generator = torch.Generator(device=X.device)
+    else:
+        generator = torch.Generator()
+    generator.manual_seed(seed)
+    return generator
+
+
+def compute_rank_transform(X):
+    ranks = torch.argsort(torch.argsort(X, dim=0), dim=0).to(dtype=X.dtype)
+    return (ranks + 1) / (X.shape[0] + 1)
+
+
+def compute_positive_median_bandwidth(X, reg=1e-6):
+    X = adjust_independence_input(X)
+    pairwise = torch_distance(X, X, norm=2, is_squared=False)
+    triu = torch.triu_indices(pairwise.shape[0], pairwise.shape[1], offset=1, device=X.device)
+    values = pairwise[triu[0], triu[1]]
+    positive = values[values > 0]
+    if positive.numel() == 0:
+        return torch.tensor(1.0, device=X.device, dtype=X.dtype)
+    median = torch.median(positive)
+    return torch.clamp(median, min=torch.as_tensor(reg, device=X.device, dtype=X.dtype))
+
+
+def compute_inverse_sqrt_matrix(M, reg):
+    eye = torch.eye(M.shape[0], device=M.device, dtype=M.dtype)
+    evals, evecs = torch.linalg.eigh(M + reg * eye)
+    evals = torch.clamp(evals, min=reg)
+    return evecs @ torch.diag(evals.rsqrt()) @ evecs.transpose(-1, -2)
+
+
+def compute_rdc_statistic(X, Y, generator, num_features=20, scale=None, reg=1e-6):
+    X = adjust_independence_input(X)
+    Y = adjust_independence_input(Y)
+    n = X.shape[0]
+    if n < 2:
+        return torch.zeros((), device=X.device, dtype=X.dtype)
+
+    scale = 1.0 / 6.0 if scale is None else scale
+    scale = torch.as_tensor(scale, device=X.device, dtype=X.dtype)
+    reg = torch.as_tensor(reg, device=X.device, dtype=X.dtype)
+
+    X_copula = compute_rank_transform(X)
+    Y_copula = compute_rank_transform(Y)
+    ones = torch.ones((n, 1), device=X.device, dtype=X.dtype)
+    X_aug = torch.cat([X_copula, ones], dim=1)
+    Y_aug = torch.cat([Y_copula, ones], dim=1)
+
+    Wx = torch.randn((X_aug.shape[1], num_features), generator=generator, device=X.device, dtype=X.dtype)
+    Wy = torch.randn((Y_aug.shape[1], num_features), generator=generator, device=Y.device, dtype=Y.dtype)
+    bx = 2 * torch.pi * torch.rand((1, num_features), generator=generator, device=X.device, dtype=X.dtype)
+    by = 2 * torch.pi * torch.rand((1, num_features), generator=generator, device=Y.device, dtype=Y.dtype)
+
+    Fx = torch.sin(scale * (X_aug @ Wx) + bx)
+    Fy = torch.sin(scale * (Y_aug @ Wy) + by)
+    Fx = Fx - Fx.mean(dim=0, keepdim=True)
+    Fy = Fy - Fy.mean(dim=0, keepdim=True)
+
+    denom = max(n - 1, 1)
+    Sxx = (Fx.transpose(0, 1) @ Fx) / denom
+    Syy = (Fy.transpose(0, 1) @ Fy) / denom
+    Sxy = (Fx.transpose(0, 1) @ Fy) / denom
+
+    inv_sqrt_x = compute_inverse_sqrt_matrix(Sxx, reg)
+    inv_sqrt_y = compute_inverse_sqrt_matrix(Syy, reg)
+    corr = inv_sqrt_x @ Sxy @ inv_sqrt_y
+    singular_values = torch.linalg.svdvals(corr)
+    return torch.clamp(singular_values[0], min=0.0, max=1.0)
+
+
+def compute_permutation_p_value(stat_func, X, Y, n_perm, seed):
+    observed = stat_func(X, Y, seed)
+    count = torch.zeros((), device=X.device, dtype=X.dtype)
+    for perm_idx in range(n_perm):
+        generator = create_independence_generator(Y, seed + perm_idx + 1)
+        perm = torch.randperm(Y.shape[0], generator=generator, device=Y.device)
+        permuted = stat_func(X, Y[perm], seed)
+        count = count + (permuted >= observed).to(dtype=X.dtype)
+    p_value = (count + 1) / (n_perm + 1)
+    return p_value, observed
+
+
+def compute_fsic_features(X, locations, bandwidth):
+    pairwise = torch_distance(X, locations, norm=2, is_squared=True)
+    features = gaussian_kernel(pairwise, bandwidth, is_squared=True)
+    features = features.transpose(0, 1)
+    return features - features.mean(dim=0, keepdim=True)
+
+
+def compute_fsic_statistic(X, Y, x_indices, y_indices, reg=1e-6):
+    X = adjust_independence_input(X)
+    Y = adjust_independence_input(Y)
+    n = X.shape[0]
+    if n < 2:
+        return torch.zeros((), device=X.device, dtype=X.dtype)
+
+    locations_X = X[x_indices]
+    locations_Y = Y[y_indices]
+
+    bandwidth_X = compute_positive_median_bandwidth(X, reg=reg)
+    bandwidth_Y = compute_positive_median_bandwidth(Y, reg=reg)
+
+    features_X = compute_fsic_features(X, locations_X, bandwidth_X)
+    features_Y = compute_fsic_features(Y, locations_Y, bandwidth_Y)
+    U = (features_X.unsqueeze(2) * features_Y.unsqueeze(1)).reshape(n, x_indices.shape[0] * y_indices.shape[0])
+
+    mean_u = U.mean(dim=0)
+    centered = U - mean_u
+    covariance = (centered.transpose(0, 1) @ centered) / max(n - 1, 1)
+    reg = torch.as_tensor(reg, device=X.device, dtype=X.dtype)
+    eye = torch.eye(covariance.shape[0], device=X.device, dtype=X.dtype)
+    solved = torch.linalg.solve(covariance + reg * eye, mean_u.unsqueeze(1))
+    return n * (mean_u.unsqueeze(0) @ solved).squeeze()

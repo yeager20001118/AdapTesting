@@ -2,7 +2,7 @@ import gc
 import torch
 from .utils import *
 from .tst_method import median, fuse, agg, deep, clf
-from .idt_method import hsicagg
+from .idt_method import hsicagg, rdc, fsic
 
 def tst(
         X,
@@ -167,7 +167,9 @@ def idt(
 
         p_value, stat_value = hsicagg(X, Y, alpha, n_perm, seed, hsic_collection_parameters, R, B3)
     elif method == 'rdc':
-        p_value, stat_value = rdc(X, Y)
+        p_value, stat_value = rdc(X, Y, n_perm=n_perm, seed=seed)
+    elif method == 'fsic':
+        p_value, stat_value = fsic(X, Y, n_perm=n_perm, seed=seed)
     else:
         raise ValueError("Unsupported independence testing method")
 
@@ -189,20 +191,4 @@ def idt(
         torch.cuda.empty_cache()
 
     return h, stat_value, p_value
-
-def rdc():
-    """
-    Reference from the github link: https://github.com/lopezpaz/randomized_dependence_coefficient
-    Paper: "The Randomized Dependence Coefficient" (NeurIPS 2013)
-    """
-
-    return None, None, None
-
-def fsic():
-    """
-    Reference from the github link: https://github.com/wittawatj/fsic-test/tree/master
-    Paper: "An Adaptive Test of Independence with Analytic Kernel Embeddings" (ICML 2017)
-    """
-
-    return None, None, None
 

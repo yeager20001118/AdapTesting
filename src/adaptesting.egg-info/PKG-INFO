@@ -55,7 +55,7 @@ Hypothesis testing serves as a fundamental statistical tool in machine learning 
 
 To address these challenges, we present ***AdapTesting***, a comprehensive toolbox that unifies state-of-the-art hypothesis testing methods for machine learning applications. Our toolbox simplifies the testing process to its essence: users only need to provide their data and optionally specify the desired testing method name (as we provide the default method for both time-efficiency and power-generability) to receive comprehensive results, including result of testing, p-values, and test statistics. By standardizing implementation in Python and PyTorch frameworks, we ensure GPU-accelerated computations across different computing systems while maintaining a consistent interface.
 
-Our initial release focuses on implementing comprehensive two-sample testing methods, with planned extensions to include independence testing and other frequently used hypothesis tests in subsequent releases. Through AdapTesting, we aim to democratize statistical testing in machine learning by providing a unified, efficient, and accessible framework that bridges the gap between theoretical methods and practical applications.
+Our current release provides both two-sample testing and independence testing under one PyTorch-based interface. Through AdapTesting, we aim to democratize statistical testing in machine learning by providing a unified, efficient, and accessible framework that bridges the gap between theoretical methods and practical applications.
 
 ## Methods for Two-sample Testing - referenced paper
 
@@ -64,6 +64,12 @@ Our initial release focuses on implementing comprehensive two-sample testing met
 - MMD-Agg - [MMD Aggregated Two-Sample Test](https://arxiv.org/pdf/2110.15073)
 - MMD-Deep - [Learning Deep Kernels for Non-Parametric Two-Sample Tests](https://arxiv.org/pdf/2002.09116)
 - C2ST-MMD - [Revisiting Classifier Two-Sample Tests](https://arxiv.org/pdf/1610.06545)
+
+## Methods for Independence Testing - referenced paper
+
+- HSICAggInc - [Efficient Aggregated Kernel Tests using Incomplete U-statistics](https://arxiv.org/pdf/2206.09194)
+- RDC - [The Randomized Dependence Coefficient](https://papers.nips.cc/paper_files/paper/2013/file/aab3238922bcc25a6f606eb525ffdc56-Paper.pdf)
+- FSIC - [An Adaptive Test of Independence with Analytic Kernel Embeddings](https://proceedings.mlr.press/v70/jitkrittum17a/jitkrittum17a.pdf)
 
 ### Installation and Usage
 
@@ -196,6 +202,39 @@ Otherwise,
 """
 ```
 
+#### Example usage of Independence Testing
+
+The main API for independence testing is `idt`, which takes paired samples `X` and `Y` with the same number of rows.
+
+```Python
+from adaptesting import idt
+
+import torch
+
+# Example synthetic paired data
+X = torch.randn(1000, 1)
+Y = X ** 2 + 0.1 * torch.randn(1000, 1)
+
+# Three currently available independence testing methods:
+h, stat_value, p_value = idt(X, Y, device="cuda")  # default method is "rdc"
+
+# Other available methods (uncomment to use):
+# h, stat_value, p_value = idt(X, Y, device="cuda", method="fsic", n_perm=200)
+# h, stat_value, p_value = idt(X, Y, device="cuda", method="hsicagg", n_perm=500, R=X.shape[0]-1)
+
+"""
+Output of idt:
+    (result of testing: 0 or 1,
+    test statistics value of paired samples,
+    p-value of testing)
+
+If testing rejects independence, the console will output
+    'Reject the null hypothesis with p-value: ..., the test statistics for {method} is ...'.
+Otherwise,
+    'Fail to reject the null hypothesis with p-value: ..., the test statistics for {method} is ...'.
+"""
+```
+
 ### Performance of Two-sample Testing methods
 
 Performance evaluations and benchmarks across tabular, image, and text data can be found in the [examples](./examples) directory.
@@ -212,9 +251,19 @@ Performance evaluations and benchmarks across tabular, image, and text data can 
 4. **MMD-Deep**: Deep kernel MMD with neural network learned features
 5. **C2ST-MMD**: Classifier two-sample test with MMD statistic -->
 
-## Future Features
+## Current Scope and Future Features
 
-We are still working on providing the toolbox functionality for other hypothesis testings, e.g., **independence testing**, **conditional independence testing**, **relative testing** and **distribution closeness testing**.
+Current scope:
+
+- Two-sample testing through `tst`
+- Independence testing through `idt`
+
+Planned additions:
+
+- Dataset wrappers and examples for independence testing
+- Conditional independence testing
+- Relative testing
+- Distribution closeness testing
 
 ## Contributors
 
