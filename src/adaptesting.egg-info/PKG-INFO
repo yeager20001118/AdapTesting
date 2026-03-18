@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: adaptesting
 Version: 0.0.1
 Summary: A toolbox to directly access to various two-sample testing methods.
@@ -23,6 +23,15 @@ Requires-Dist: transformers
 Requires-Dist: einops
 Requires-Dist: datasets<4.0.0
 Requires-Dist: torchattacks
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
 
 <div align="center">
  <img align="left" width="200" src="./src/newlogo-removebg1.png">
@@ -87,7 +96,9 @@ uv pip install autogluon.tabular[mitra]
 
 #### Datasets for Two-sample Testing
 
-You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets.
+You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets. 
+
+For the dataset module details, currently available dataset classes, and usage conventions, see [datasets](./src/adaptesting/datasets/README.md).
 
 ```Python
 from adaptesting import datasets

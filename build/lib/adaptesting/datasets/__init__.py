@@ -11,13 +11,15 @@ from importlib import import_module
 
 
 _EXPORT_TO_MODULE = {
-    'TSTDataset': '.base',
-    'HiggsBoson': '.tabular',
-    'HDGM': '.tabular',
-    'CIFAR10Adversarial': '.image',
-    'CIFAR10_1': '.image',
-    'HumanAIDetection': '.text',
-    'HC3': '.text',
+    'HiggsBoson': '.tst.tabular',
+    'HDGM': '.tst.tabular',
+    'BLOB': '.tst.tabular',
+    'SyntheticJointSplit': '.idt.tabular',
+    'MNISTLabelCorruption': '.idt.image',
+    'CIFAR10Adversarial': '.tst.image',
+    'CIFAR10_1': '.tst.image',
+    'HumanAIDetection': '.tst.text',
+    'HC3': '.tst.text',
 }
 
 __all__ = list(_EXPORT_TO_MODULE.keys())

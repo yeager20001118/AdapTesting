@@ -166,3 +166,109 @@ class TextTSTDataset(TSTDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.data_type = "text"
+
+
+class IDTDataset(ABC):
+    """
+    Base class for all independence testing datasets.
+
+    All datasets should return two torch tensors X and Y representing
+    paired samples with the same number of rows.
+    """
+
+    def __init__(
+        self,
+        root: str = './data',
+        N: int = 1000,
+        download: bool = True,
+        transform: Optional[Any] = None,
+        target_transform: Optional[Any] = None,
+        seed: int = 42,
+        t1_check: bool = False
+    ):
+        """
+        Args:
+            root (str): Root directory where dataset will be stored
+            N (int): Number of paired samples
+            download (bool): If True, download dataset if not found
+            transform: Optional transform to apply to X
+            target_transform: Optional transform to apply to Y
+            seed (int): Random seed for reproducibility
+            t1_check (bool): If True, draw X and Y under independence
+        """
+        self.root = os.path.expanduser(root)
+        self.N = N
+        self.download = download
+        self.transform = transform
+        self.target_transform = target_transform
+        self.seed = seed
+        self.t1_check = t1_check
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+        os.makedirs(self.root, exist_ok=True)
+
+        if download:
+            self._download()
+
+        if not self._check_exists():
+            raise RuntimeError(
+                f'Dataset not found at {self.root}. '
+                f'Set download=True to download it.'
+            )
+
+    @abstractmethod
+    def _download(self):
+        """Download the raw dataset."""
+        pass
+
+    @abstractmethod
+    def _check_exists(self) -> bool:
+        """Check if the processed dataset exists."""
+        pass
+
+    @abstractmethod
+    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Load and return paired samples for independence testing.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: (X, Y) with matching sample counts
+        """
+        pass
+
+    def __call__(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._load_data()
+
+    def __len__(self) -> int:
+        return self.N
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"N={self.N}, "
+                f"root='{self.root}')")
+
+
+class TabularIDTDataset(IDTDataset):
+    """Base class for tabular independence datasets."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data_type = "tabular"
+
+
+class ImageIDTDataset(IDTDataset):
+    """Base class for image independence datasets."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data_type = "image"
+
+
+class TextIDTDataset(IDTDataset):
+    """Base class for text independence datasets."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data_type = "text"
