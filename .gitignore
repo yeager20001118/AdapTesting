@@ -3,3 +3,4 @@ examples/data/
 data.zip
 src/adaptesting/datasets/data/cifar-10*
 /prompts
+hidden*
