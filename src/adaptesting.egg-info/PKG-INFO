@@ -1,4 +1,4 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: adaptesting
 Version: 0.0.1
 Summary: A toolbox to directly access to various two-sample testing methods.
@@ -23,15 +23,6 @@ Requires-Dist: transformers
 Requires-Dist: einops
 Requires-Dist: datasets<4.0.0
 Requires-Dist: torchattacks
-Dynamic: author
-Dynamic: author-email
-Dynamic: classifier
-Dynamic: description
-Dynamic: description-content-type
-Dynamic: license-file
-Dynamic: requires-dist
-Dynamic: requires-python
-Dynamic: summary
 
 <div align="center">
  <img align="left" width="200" src="./src/newlogo-removebg1.png">
@@ -181,13 +172,13 @@ mvn1, mvn2 = MultivariateNormal(mean, cov1), MultivariateNormal(mean, cov2)
 X, Y = mvn1.sample((1000,)), mvn2.sample((1000,)) 
 
 # Five kinds of SOTA TST methods to choose：
-h, mmd_value, p_value = tst(X, Y, device="cuda") # Default method using median heuristic, device can be either "cuda", "cpu" or "mps"
+h, stat_value, p_value = tst(X, Y, device="cuda") # Default method using median heuristic, device can be either "cuda", "cpu" or "mps"
 
 # Other available methods and their default arguments setting (uncomment to use):
-# h, mmd_value, p_value = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
-# h, mmd_value, p_value = tst(X, Y, device="cuda", method="agg", n_perm=3000)
-# h, mmd_value, p_value = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
-# h, mmd_value, p_value = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
+# h, stat_value, p_value = tst(X, Y, device="cuda", method="fuse", kernel="laplace_gaussian", n_perm=2000)
+# h, stat_value, p_value = tst(X, Y, device="cuda", method="agg", n_perm=3000)
+# h, stat_value, p_value = tst(X, Y, device="cuda", method="clf", data_type="tabular", patience=150, n_perm=200)
+# h, stat_value, p_value = tst(X, Y, device="cuda", method="deep", data_type="tabular", patience=150, n_perm=200)
 
 """
 Output of tst: 

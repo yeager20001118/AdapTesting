@@ -14,6 +14,7 @@ _EXPORT_TO_MODULE = {
     'TSTDataset': '.base',
     'HiggsBoson': '.tabular',
     'HDGM': '.tabular',
+    'BLOB': '.tabular',
     'CIFAR10Adversarial': '.image',
     'CIFAR10_1': '.image',
     'HumanAIDetection': '.text',

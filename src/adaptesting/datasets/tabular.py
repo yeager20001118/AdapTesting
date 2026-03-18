@@ -572,6 +572,116 @@ class HDGM(TabularTSTDataset):
         return torch.tensor(P, dtype=torch.float32), torch.tensor(Q, dtype=torch.float32)
 
 
+class BLOB(TabularTSTDataset):
+    """
+    BLOB synthetic dataset.
+
+    This synthetic dataset generates two-dimensional blob mixtures on a grid.
+    It supports both power evaluation and Type-I error checking through
+    the existing ``t1_check`` flag from the base dataset class.
+    """
+
+    def __init__(
+        self,
+        root: str = './data',
+        N: int = 500,
+        M: int = 500,
+        download: bool = True,
+        rows: int = 3,
+        cols: int = 3,
+        var: float = 0.03,
+        min_corr: float = 0.02,
+        kk: int = 0,
+        **kwargs
+    ):
+        """
+        Args:
+            rows (int): Number of grid rows
+            cols (int): Number of grid columns
+            var (float): Marginal variance for each blob
+            min_corr (float): Minimum covariance offset used for Q under the alternative
+            kk (int): Random seed modifier
+        """
+        self.rows = rows
+        self.cols = cols
+        self.var = var
+        self.min_corr = min_corr
+        self.kk = kk
+        super().__init__(root, N, M, download, **kwargs)
+
+    def _download(self):
+        # Synthetic data, no download needed
+        pass
+
+    def _check_exists(self) -> bool:
+        # Always exists since it is generated on the fly
+        return True
+
+    def _create_grid(self, n_rows, n_cols):
+        return np.array([[i, j] for i in range(n_rows) for j in range(n_cols)])
+
+    def _create_blob_cov_matrix(self, n_locs, variance, min_corr):
+        n_side = n_locs // 2
+        correlations = min_corr + np.arange(n_side) * 0.002
+        correlations = np.concatenate([
+            correlations[::-1] * -1,
+            [0],
+            correlations
+        ])
+
+        return np.array([
+            [[variance, corr],
+             [corr, variance]]
+            for corr in correlations
+        ]).round(4)
+
+    def _sample_blob(self, N_more, N_less, rs, is_alternative):
+        mu = np.zeros(2)
+        sigma = np.eye(2) * (self.var - 0.01)
+        sigmas = self._create_blob_cov_matrix(
+            n_locs=self.rows * self.cols,
+            variance=self.var,
+            min_corr=self.min_corr,
+        )
+
+        random_state = np.random.RandomState(rs)
+
+        X = random_state.multivariate_normal(mu, sigma, size=N_more)
+        X_row = random_state.randint(self.rows, size=N_more)
+        X_col = random_state.randint(self.cols, size=N_more)
+        X[:, 0] += X_row
+        X[:, 1] += X_col
+
+        if is_alternative:
+            Y = random_state.multivariate_normal(mu, np.eye(2), size=N_less)
+            Y_row = random_state.randint(self.rows, size=N_less)
+            Y_col = random_state.randint(self.cols, size=N_less)
+
+            locs = self._create_grid(self.rows, self.cols)
+            for i, loc in enumerate(locs):
+                tgt_row, tgt_col = loc
+                L = np.linalg.cholesky(sigmas[i])
+
+                mask = (Y_row == tgt_row) & (Y_col == tgt_col)
+                Y[mask] = Y[mask] @ L + loc
+        else:
+            Y = random_state.multivariate_normal(mu, sigma, size=N_less)
+            Y[:, 0] += random_state.randint(self.rows, size=N_less)
+            Y[:, 1] += random_state.randint(self.cols, size=N_less)
+
+        return X, Y
+
+    def _load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        X, Y = self._sample_blob(
+            self.N,
+            self.M,
+            self.seed + self.kk,
+            not self.t1_check,
+        )
+
+        return torch.tensor(X, dtype=torch.float32), torch.tensor(Y, dtype=torch.float32)
+
+
 # class AdultIncome(TabularTSTDataset):
 #     """
 #     Adult Income dataset with challenging distribution shifts.
