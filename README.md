@@ -61,9 +61,9 @@ uv pip install autogluon.tabular[mitra]
 
 #### Datasets for Two-sample Testing
 
-You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets.
+You can load some frequently used datasets (for tabular, image and text) directly from our package. More examples can be found in the [datasets examples](./examples/main_example.ipynb), and we will keep updating the datasets. 
 
-For the dataset module structure, currently available dataset classes, and usage conventions, see [src/adaptesting/datasets/README.md](./src/adaptesting/datasets/README.md).
+For the dataset module details, currently available dataset classes, and usage conventions, see [datasets](./src/adaptesting/datasets/README.md).
 
 ```Python
 from adaptesting import datasets
